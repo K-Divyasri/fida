@@ -16,13 +16,14 @@ function out = mrsi_on_t1_map(S_time, S_freq, outPath, emptyNiiPath, options)
 %                    .map, .crlb, .LW, .SNR, .metabolite_name (for metabolite mode)
 %
 % ORIENTATION NOTE
-%   spec2nii's transverse path swaps PE/RO so the NIfTI is laid out
-%   [RO, PE, slice, T].  FID-A names its readout axis dims.x and its
-%   phase-encode axis dims.y, so the permute order [dims.x, dims.y, dims.t]
-%   produces [RO, PE, T] -- which matches the spec2nii sform directly.
-%   For sagittal/coronal spec2nii doesn't swap; the same permute still
-%   matches because FID-A's x/y already correspond to row/col on those
-%   planes.  No flipud/fliplr/rot90 is needed in the writer.
+%   The spatial layout is built with the SAME transform that
+%   mrsi_integration_panel uses for its (verified-perfect) T1-aligned NIfTI:
+%       img = flip(mp.', 1)        where mp is (Ny, Nx) = (iy, ix)
+%   i.e. arrange the data as (iy, ix), transpose to (ix, iy), then flip the
+%   ix axis.  Signal mode applies this per time point; metabolite mode applies
+%   it to the 2-D map.  Because the writer and the integration panel use the
+%   identical transform, nii_viewer and the panel overlay agree exactly on
+%   the T1.  No additional flipud/fliplr/rot90 is needed.
 
     if nargin < 5, options = struct(); end
     if ~isfield(options, 'mode'), options.mode = 'signal'; end
@@ -35,23 +36,17 @@ function out = mrsi_on_t1_map(S_time, S_freq, outPath, emptyNiiPath, options)
     switch lower(options.mode)
     case 'signal'
         %% ------------------ SIGNAL MODE: 4D time-domain --------------------
-        % FID-A data layout after NUFFT+coilCombine+average:
-        %   data dims = [..., t, ..., y, ..., x, ...]
-        % Put it in [RO, PE, 1, T] order to match the spec2nii sform.
-        permOrder = [S_time.dims.x, S_time.dims.y, dSpec_time];
-        vol = permute(S_time.data, permOrder);
-        [X, Y, T] = size(vol);
-        vol = reshape(vol, [X, Y, 1, T]);
-        vol = single(vol);                       % nii_tool keeps complex64
-
-        % Flip NIfTI dim 1 (X / readout).  Empirically confirmed against
-        % T1-resampled-on-MRSI-slab: spec2nii's transverse sform points X in
-        % the opposite direction of FID-A's xC ascending axis, so the data
-        % values need to be reversed along dim 1 to land at the world X
-        % coordinate the sform claims for each voxel.  Y does *not* need a
-        % flip because FID-A's yC is in DICOM Cor which is already opposite
-        % to RAS Y -- the two opposites cancel.
-        vol = flip(vol, 1);
+        % Lay out each spatial slice with the EXACT transform that
+        % mrsi_integration_panel uses for its (verified-perfect) T1-aligned
+        % NIfTI:  img = flip(mp.', 1)  where mp is (Ny, Nx) = (iy, ix).
+        % We apply that same transform per time point so the 4D overlay lands
+        % on the T1 in exactly the panel's orientation.
+        %   1. arrange data as (iy, ix, t)
+        %   2. transpose iy<->ix, then flip dim 1 (ix)  ==  flip(slice.',1) per t
+        arr = permute(S_time.data, [S_time.dims.y, S_time.dims.x, dSpec_time]); % (Ny, Nx, T)
+        [Y, X, T] = size(arr);                    % Y = Ny (iy), X = Nx (ix)
+        vol = flip(permute(arr, [2 1 3]), 1);     % (X, Y, T): vol(a,b,t)=data(ix=X-a+1, iy=b)
+        vol = single(reshape(vol, [X, Y, 1, T])); % nii_tool keeps complex64
 
         % Sync the empty NIfTI's time dimension to whatever the data actually has
         T_expected = nii_empty.hdr.dim(5);
@@ -100,10 +95,10 @@ function out = mrsi_on_t1_map(S_time, S_freq, outPath, emptyNiiPath, options)
         metName = options.metabolite_name;
         assert(isfield(options.map, metName), 'metabolite %s not in options.map', metName);
 
-        met2d = options.map.(metName);              % [Y, X]
-        vol   = single(reshape(met2d.', [size(met2d,2), size(met2d,1), 1, 1]));
-        vol   = flip(vol, 1);                        % same dim-1 flip as signal mode
-        [X, Y, ~, ~] = size(vol);
+        met2d = options.map.(metName);              % [Y, X] = (iy, ix), same layout as panel's mp
+        img2d = flip(met2d.', 1);                    % == integration panel saveNifti: flip(mp.',1)
+        [X, Y] = size(img2d);                        % X = Nx (ix), Y = Ny (iy)
+        vol    = single(reshape(img2d, [X, Y, 1, 1]));
 
         nii_filled = nii_empty;
         nii_filled.hdr.dim(1)    = int16(3);

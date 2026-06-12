@@ -47,6 +47,7 @@
             dimensionIndexes.yRange (2, 1) double
             dimensionIndexes.yMul (1, 1) double = 1
             dimensionIndexes.lineWidth (1, 1) double = 1
+            dimensionIndexes.showIndex (1, 1) logical = true
         end
         % check arguments to make sure they are okay
         checkArguments(MRSIStruct, dimensionIndexes);
@@ -69,14 +70,34 @@
         %create figure and hold
         [fig, ax] = setUpFigureAndAxes(xRange, yRange, MRSIStruct);
         
+        Ny_full = numel(yCoordinate);   % full y-grid size for panel-index labels
         for x_idx = 1:size(data, 3)
             for y_idx = 1:size(data, 2)
-                %first scale the ppm scale so that the range is correct;
-                timeVectorPlot = ppmVector + (x_idx - 1)*voxSizeX - voxSizeX/2 + xCoordinate(xRange(1));
-                % scale y vector to the right position
-                y_coords = data(:, y_idx, x_idx) + (size(data, 2) - y_idx)*voxSizeY + yCoordinate(yRange(1));
+                % Horizontal: 1st index (x) increases to the RIGHT.
+                cellLeft       = (x_idx - 1)*voxSizeX - voxSizeX/2 + xCoordinate(xRange(1));
+                timeVectorPlot = ppmVector + cellLeft;
+                % Vertical: matches mrsi_integration_panel — data row iy=Ny is
+                % drawn at the BOTTOM, iy=1 at the top (the (size(data,2)-y_idx)
+                % offset).  This keeps the SAME physical voxel at the bottom
+                % of both viewers.
+                baseY    = (size(data, 2) - y_idx)*voxSizeY + yCoordinate(yRange(1));
+                y_coords = data(:, y_idx, x_idx) + baseY;
                 %Now start plotting
                 plot(ax, timeVectorPlot, y_coords, 'PickableParts', 'none', 'LineWidth', dimensionIndexes.lineWidth);
+
+                % Per-voxel label uses the PANEL index (matches the
+                % integration panel): bottom-left = (1,1), 1st index -> right,
+                % 2nd index -> up.  px = data-x ; py = Ny - data-y + 1.
+                if dimensionIndexes.showIndex
+                    ix = xRange(1) + x_idx - 1;     % data x index
+                    iy = yRange(1) + y_idx - 1;     % data y index
+                    px = ix;
+                    py = Ny_full - iy + 1;
+                    text(ax, cellLeft, baseY + 0.45*voxSizeY, sprintf('%d,%d', px, py), ...
+                        'FontSize', 7, 'Color', [0.45 0.45 0.45], ...
+                        'HorizontalAlignment', 'left', 'VerticalAlignment', 'top', ...
+                        'PickableParts', 'none', 'Clipping', 'on');
+                end
             end
         end
         hold(ax, 'off');
@@ -192,13 +213,13 @@
     
         %max spectrum difference in a voxel
         spectrumHight = max(max(data, [], 1) - min(data, [], 1), [], 'all');
-    
+        
         %scale factors to fit at each (x,y) coordinates
         
         voxSizeX = getVoxSize(MRSIStruct, 'x');
         voxSizeY = getVoxSize(MRSIStruct, 'y');
         scalefactorX = abs((0.8 * voxSizeX) / (timeVector(end) - timeVector(1)));
-        scalefactorY = yMul * abs((0.8 * voxSizeY) / spectrumHight);
+        scalefactorY = yMul * abs((0.8* voxSizeY) / spectrumHight);
     end
     
     % Argument checks

@@ -250,7 +250,6 @@ function writeBashScript(outPath, cfg)
     wl('controlfile="${outdir}/${series}.control"');
     wl('logfile="${outdir}/${series}.log"');
     wl('');
-
     wl('{');
     wl('  echo ''$LCMODL''');
     wl('  echo "OWNER=''${OWNER}''"');

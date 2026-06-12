@@ -1,18 +1,17 @@
-function mrsi_integration_panel(t1Path, mrsi4DPath, brainmask)
-%MRSI_INTEGRATION_PANEL  Brain-masked ppm-integration heatmap + click-to-spectrum.
+function mrsi_integration_panel(t1Path, mrsi4DPath)
+%MRSI_INTEGRATION_PANEL  Whole-grid ppm-integration heatmap + click-to-spectrum.
 %
-%   mrsi_integration_panel(t1Path, mrsi4DPath, brainmask)
+%   mrsi_integration_panel(t1Path, mrsi4DPath)
 %
 %   - t1Path:     T1 NIfTI (background for nii_viewer)
 %   - mrsi4DPath: 4-D MRSI NIfTI written by mrsi_on_t1_map.m.
 %                 Its companion <base>_ftSpec.mat is loaded for the spectra.
-%   - brainmask:  2-D logical [Ny x Nx] = ccav_w.mask.brainmasks.
 %
 %   What the function does, in order:
 %     1. Load ftSpec from the .mat companion of mrsi4DPath
 %     2. Build a control window (PPM min/max, preset buttons, heatmap, spectrum)
-%     3. On Update / preset:  integrate |Re(spec)| over [lo, hi] inside the
-%        brain mask, normalise by the 99th percentile, redraw the heatmap,
+%     3. On Update / preset:  integrate |Re(spec)| over [lo, hi] across the
+%        ENTIRE grid, normalise by the 99th percentile, redraw the heatmap,
 %        save it as a 3-D NIfTI, and overlay it on the T1 in nii_viewer with
 %        the "hot" colormap.
 %     4. Click a heatmap voxel -> plot its spectrum with the integration
@@ -21,7 +20,6 @@ function mrsi_integration_panel(t1Path, mrsi4DPath, brainmask)
 arguments
     t1Path     (1,:) char {mustBeFile}
     mrsi4DPath (1,:) char {mustBeFile}
-    brainmask         {mustBeNumericOrLogical}
 end
 
 %% ----- 1.  load ftSpec ---------------------------------------------------
@@ -37,9 +35,11 @@ spec = real(permute(ftSpec.data, ...
               [ftSpec.dims.f, ftSpec.dims.y, ftSpec.dims.x]));   % (Nf, Ny, Nx)
 [~, Ny, Nx] = size(spec);
 
-bm = logical(brainmask);
-assert(isequal(size(bm), [Ny, Nx]), 'brainmask must be %dx%d', Ny, Nx);
-fprintf('Brain mask: %d / %d voxels (%.1f%%).\n', sum(bm(:)), numel(bm), 100*mean(bm(:)));
+% No brain mask: integrate, normalise, and display over the ENTIRE grid.
+% bm is kept as an all-true mask so the compute/draw routines below need no
+% other change (they simply now cover every voxel).
+bm = true(Ny, Nx);
+fprintf('Whole-grid integration: %d voxels (%dx%d).\n', Ny*Nx, Ny, Nx);
 
 heatPath = fullfile(outDir, [base '_intHeatmap.nii.gz']);
 
@@ -187,19 +187,25 @@ compute();      % do the initial integration over the full ppm range
 
     function drawSpec()
         cla(spec_ax);
-        iy = sel(1);  ix = sel(2);
+        iy = sel(1);  ix = sel(2);             % ftSpec data indices (unchanged)
         if ~bm(iy, ix)
             text(spec_ax, 0.5, 0.5, sprintf('(x=%d, y=%d) outside brain mask', ix, iy), ...
                 'Units','normalized', 'HorizontalAlignment','center', 'Color',[0.55 0.55 0.55]);
             set(spec_ax,'XTick',[],'YTick',[]);  title(spec_ax,'');
             return
         end
+        % Panel index: (1,1) is the BOTTOM-LEFT voxel as displayed; 1st index
+        % increases to the right, 2nd index increases upward.  This is only a
+        % relabel of the displayed heatmap voxel -- the spectrum pulled
+        % (spec(:,iy,ix)) and the image orientation are unchanged.
+        px = ix;                 % 1st panel index  -> increases rightward
+        py = Ny - iy + 1;        % 2nd panel index  -> increases upward, bottom=1
         plot(spec_ax, ppm, spec(:, iy, ix), 'b-', 'LineWidth',1.2);
         set(spec_ax, 'XDir','reverse');  grid(spec_ax,'on');
         xlim(spec_ax, [min(ppm) max(ppm)]);
         xlabel(spec_ax, 'Chemical shift (ppm)');  ylabel(spec_ax, 'Re(ftSpec)');
-        title(spec_ax, sprintf('Spectrum @ voxel (x=%d, y=%d)  -  green band = %d summed points', ...
-              ix, iy, n_pts));
+        title(spec_ax, sprintf('Spectrum @ panel (%d, %d)   [data x=%d y=%d]   -  %d summed pts', ...
+              px, py, ix, iy, n_pts));
         if n_pts > 0
             yl = ylim(spec_ax);
             hold(spec_ax,'on');
@@ -277,11 +283,5 @@ function fire(h)
         elseif isa(cb,'function_handle'), cb(h, []);
         end
     catch
-    end
-end
-
-function mustBeNumericOrLogical(x)
-    if ~(isnumeric(x) || islogical(x)) || isempty(x)
-        error('brainmask must be a non-empty numeric/logical array.');
     end
 end

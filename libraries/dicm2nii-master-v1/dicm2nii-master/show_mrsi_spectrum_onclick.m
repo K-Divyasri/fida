@@ -69,8 +69,13 @@ function show_mrsi_spectrum_onclick(hs, p, c, ax)
             ijk_mrsi = ijk_bg(1:3);
         end
         
-        fprintf('MRSI voxel: [%d, %d, %d]\n', ijk_mrsi(1), ijk_mrsi(2), ijk_mrsi(3));
-        
+        % Panel index of the pulled ftSpec voxel (ix=a, iy=Ny-b+1) is (a, b),
+        % matching the integration panel for the same spectrum.
+        px_panel = ijk_mrsi(1);
+        py_panel = ijk_mrsi(2);
+        fprintf('MRSI voxel: NIfTI [%d, %d, %d]   panel (%d,%d)\n', ...
+            ijk_mrsi(1), ijk_mrsi(2), ijk_mrsi(3), px_panel, py_panel);
+
         % Bounds check
         if ijk_mrsi(1) < 1 || ijk_mrsi(1) > img_size(1) || ...
            ijk_mrsi(2) < 1 || ijk_mrsi(2) > img_size(2) || ...
@@ -548,7 +553,27 @@ function show_spectrum(hs, p, ijk_mrsi, img_size)
     
     if show_freq
         try
-            vox_MRS = op_CSItoMRS(p.ftSpec_smooth_w, ijk_mrsi(1), ijk_mrsi(2));
+            % Extract the spectrum EXACTLY like mrsi_integration_panel:
+            % raw real(ftSpec.data) at the voxel, with ftSpec.ppm.  We do NOT
+            % use op_CSItoMRS here because it conditionally ifft's the data
+            % when the 'spectralft' flag is not set, producing a different
+            % curve.  Indexing the data directly guarantees the nii_viewer
+            % spectrum is identical to the integration panel.
+            %
+            % The ccav_w overlay (written by mrsi_on_t1_map) is correct, but
+            % ftSpec_smooth is stored 180 deg rotated (flipped in BOTH x and y)
+            % relative to ccav_w.  The overlay voxel shown at NIfTI (a,b) is
+            % ccav_w(Nx-a+1, b); the ftSpec voxel that PHYSICALLY matches it is
+            % (ix = a, iy = Ny - b + 1).  Pull that so the spectrum belongs to
+            % the clicked overlay voxel.
+            ft   = p.ftSpec_smooth_w;
+            fDim = ft.dims.f;  if fDim == 0, fDim = ft.dims.t; end
+            Ny_d = ft.sz(ft.dims.y);
+            ix_d = ijk_mrsi(1);
+            iy_d = Ny_d - ijk_mrsi(2) + 1;
+            specCube = permute(ft.data, [fDim, ft.dims.y, ft.dims.x]);  % (Nf, Ny, Nx)
+            vox_MRS  = struct('specs', squeeze(specCube(:, iy_d, ix_d)), ...
+                              'ppm',   ft.ppm(:));
         catch
             show_freq = false;
         end
@@ -564,28 +589,33 @@ function show_spectrum(hs, p, ijk_mrsi, img_size)
     clear_axis_content(hs.ax(4));
     
     if show_freq
+        % Panel index of the pulled ftSpec voxel (ix=a, iy=Ny-b+1) is (a, b),
+        % which matches the integration panel's index for the same spectrum.
+        px_p = ijk_mrsi(1);
+        py_p = ijk_mrsi(2);
+
         width = (origPos(3) - 0.08) / 2;
         height = origPos(4) - 0.15;
         bottom = origPos(2) + 0.08;
-        
+
         ax_t = axes('Parent', get(hs.ax(4), 'Parent'), 'Units', 'normalized');
         set(ax_t, 'Position', [origPos(1)+0.03 bottom width height]);
         plot(ax_t, t_ms, real(fid), 'b-', 'LineWidth', 2);
         set(ax_t, 'XColor', 'w', 'YColor', 'w', 'Color', 'k', 'FontSize', 12, 'Box', 'off');
         xlabel(ax_t, 'Time (ms)', 'FontSize', 14, 'Color', 'w');
-        title(ax_t, sprintf('Time (Real) [%d,%d,%d]', ijk_mrsi(1), ijk_mrsi(2), ijk_mrsi(3)), ...
+        title(ax_t, sprintf('Time (Real)  panel (%d,%d)', px_p, py_p), ...
             'FontSize', 12, 'Color', 'w');
         xlim(ax_t, [0 max(t_ms)]);
-        
+
         ax_f = axes('Parent', get(hs.ax(4), 'Parent'), 'Units', 'normalized');
         set(ax_f, 'Position', [origPos(1)+0.06+width bottom width height]);
-        
+
         if isfield(vox_MRS, 'ppm') && isfield(vox_MRS, 'specs')
             plot(ax_f, vox_MRS.ppm, real(vox_MRS.specs), 'b-', 'LineWidth', 2);
             set(ax_f, 'XDir', 'reverse', 'XColor', 'w', 'YColor', 'w', ...
                 'Color', 'k', 'FontSize', 12, 'Box', 'off');
             xlabel(ax_f, 'ppm', 'FontSize', 14, 'Color', 'w');
-            title(ax_f, sprintf('Spectrum (Real) [%d,%d,%d]', ijk_mrsi(1), ijk_mrsi(2), ijk_mrsi(3)), ...
+            title(ax_f, sprintf('Spectrum (Real)  panel (%d,%d)', px_p, py_p), ...
                 'FontSize', 12, 'Color', 'w');
             xlim(ax_f, [0 6]);
         end
