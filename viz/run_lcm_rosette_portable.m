@@ -217,7 +217,9 @@ function writeBashScript(outPath, cfg)
     wl(sprintf('BASIS="%s"',        cfg.basisFile_exec));
     wl(sprintf('LICENSE_KEY="%s"',  cfg.licenseKey));
     wl(sprintf('OWNER="%s"',        strrep(cfg.ownerStr, '"', '\"')));
-    wl(sprintf('HZPPPM="%g"',       cfg.hzpppm));
+    % %.5f matches the precision gen_lcm_basis writes into makebasis.in, so the
+    % control's HZPPPM parses to the same float as the basis header (avoids MYBASI).
+    wl(sprintf('HZPPPM="%.5f"',     cfg.hzpppm));
     wl(sprintf('ECHOT="%g"',        cfg.echot));
     wl(sprintf('PPMST="%g"',        cfg.ppmst));
     wl(sprintf('PPMEND="%g"',       cfg.ppmend));
@@ -276,40 +278,28 @@ function writeBashScript(outPath, cfg)
     wl('  echo "PPMEND=${PPMEND}"');
     wl('  echo "RFWHM=0.15"');
     wl('  echo "WDLINE(1)=0.025"');
-    wl('  echo "DKNTMN=0.3"');
+    % --- PHANTOM SETTINGS -------------------------------------------------
+    % Stiffer baseline: DKNTMN 0.3 was flexible enough for the spline to
+    % swallow lone singlets (acetate at 1.904 ppm never fit).
+    wl('  echo "DKNTMN=1.0"');
     wl('  echo "NEACH=999"');
-    wl('  echo "NOMIT=14"');
-    wl('  echo "CHOMIT(1)=''bHB''"');
-    wl('  echo "CHOMIT(2)=''bHG''"');
-    wl('  echo "CHOMIT(3)=''Lip13a''"');
-    wl('  echo "CHOMIT(4)=''Lip13b''"');
-    wl('  echo "CHOMIT(5)=''Lip13c''"');
-    wl('  echo "CHOMIT(6)=''Lip13d''"');
-    wl('  echo "CHOMIT(7)=''Lip09''"');
-    wl('  echo "CHOMIT(8)=''MM09''"');
-    wl('  echo "CHOMIT(9)=''Lip20''"');
-    wl('  echo "CHOMIT(10)=''MM20''"');
-    wl('  echo "CHOMIT(11)=''MM12''"');
-    wl('  echo "CHOMIT(12)=''MM14''"');
-    wl('  echo "CHOMIT(13)=''MM17''"');
-    wl('  echo "CHOMIT(14)=''-CrCH2''"');
-    wl('  echo "NNORAT=7"');
-    wl('  echo "NORATO(1)=''Lip09/Lip13*''"');
-    wl('  echo "NORATO(2)=''Lip20/Lip13*''"');
-    wl('  echo "NORATO(3)=''MM20/MM09*''"');
-    wl('  echo "NORATO(4)=''MM12/MM09*''"');
-    wl('  echo "NORATO(5)=''MM14/MM09*''"');
-    wl('  echo "NORATO(6)=''MM17/MM09*''"');
-    wl('  echo "NORATO(7)=''-CrCH2/totCr''"');
-    wl('  echo "NRATIO=8"');
-    wl('  echo "CHRATO(1)=''MM2/MM1 = 0.51 +- 0.17''"');
-    wl('  echo "CHRATO(2)=''MM3/MM1 = 1.05 +- 0.63''"');
-    wl('  echo "CHRATO(3)=''MM4/MM1 = 1.29 +- 1.03''"');
-    wl('  echo "CHRATO(4)=''MM5/MM1 = 3.16 +- 0.79''"');
-    wl('  echo "CHRATO(5)=''MM6/MM1 = 0.63 +- 0.16''"');
-    wl('  echo "CHRATO(6)=''MM7/MM1 = 0.54 +- 0.27''"');
-    wl('  echo "CHRATO(7)=''MM8/MM1 = 0.33 +- 0.17''"');
-    wl('  echo "CHRATO(8)=''MM9/MM1 = 1.40 +- 0.7''"');
+    % NSIMUL=0 stops LCModel auto-simulating MM/Lip/Gua components. The basis
+    % holds only Lac/Ace/Cr/Cho; the simulated "Gua" singlet was absorbing
+    % signal in low-SNR voxels (conc 20.7 vs Cr 8.0 at voxel 25x18).
+    wl('  echo "NSIMUL=0"');
+    wl('  echo "NOMIT=0"');
+    % MM/lipid soft constraints reference components not in the basis.
+    wl('  echo "NNORAT=0"');
+    wl('  echo "NRATIO=0"');
+    % Preliminary Analysis metabolites. LCModel's default CHUSE1 is
+    % NAA/Cr/GPC/Glu/Ins; only Cr exists in this phantom basis, so the other
+    % four raised "WARNING MYBASI 8" and the preliminary phase/referencing fit
+    % ran on Cr alone. Name only what the basis actually contains (manual
+    % Sec 11.6, "Unusual Phantoms", option 3a).
+    wl('  echo "NUSE1=3"');
+    wl('  echo "CHUSE1(1)=''Cr''"');
+    wl('  echo "CHUSE1(2)=''Cho''"');
+    wl('  echo "CHUSE1(3)=''Lac''"');
     wl('  if [[ "$ECC" -eq 1 ]]; then');
     wl('    echo "DOECC=T"');
     wl('    echo "DOWS=T"');

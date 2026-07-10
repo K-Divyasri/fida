@@ -65,7 +65,7 @@ function lipidBasis = createLipipBasis(MRSIStruct, lipidComponents, lineWidthRan
                                                   lineWidthRange, lipidPPMRange, ...
                                                   lipidStructure);
     end
-    lipidBasis = fftshift(fft(fidBasis, [], 1), 1);
+    lipidBasis = fftshift(fft(fidBasis, [], 1), 1);   % match data spectral convention (op_CSIFourierTransform uses ifft)
 end
 
 % calculate the single lipid spectra for the basis

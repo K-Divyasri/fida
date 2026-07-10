@@ -68,8 +68,8 @@ ftSpec_w = op_CSIFourierTransform(ccav_w);
 
 %% === 6. LIPID + WATER REMOVAL + B0 CORRECTION =============================
 fprintf('\n--- 6. Lipid / water removal + B0 correction ---\n');
-ftSpec_rmlip = op_CSIssp(ftSpec, 0.8, 1.88);
-ftSpec_rmw   = op_CSIRemoveLipids(ftSpec_rmlip, ...
+%ftSpec_rmlip = op_CSIssp(ftSpec, 0.8, 1.88);
+ftSpec_rmw   = op_CSIRemoveLipids(ftSpec, ...
                   'lipidPPMRange',  [4.5 5.0], ...
                   'linewidthRange', [1 10]);
 [ftSpec_B0corr, ftSpec_B0corr_w, freqMap, R2Map] = ...
@@ -99,7 +99,9 @@ echot  = ftSpec_smooth.te;
 hzpppm = ftSpec_smooth.txfrq / 1e6; %this is taken somewhere
 
 lcmbin        = '/home/divya/.lcmodel/bin/lcmodel';   % set '' to skip LCModel
-basisFile     = 'C:\Users\divya\Downloads\fida codes\fid_a\basis_r14_phantom\LacAceCrCho_TE15_SW4000_NP4096.basis';
+% Basis rebuilt at the data dwell (BADELT = DELTAT = 6.3e-4 s, SW 1587 Hz)
+% so LCModel no longer resamples it (kills the MYBASI 8 warning).
+basisFile     = 'C:\Users\divya\Downloads\fida codes\fid_a\basis_r14_phantom\CRPhantom_LacAceCrCho_TE15_SW1587.basis';
 
 %% === 9. LCMODEL + METABOLITE MAPS =========================================
 if isempty(lcmbin)
@@ -111,10 +113,6 @@ if isempty(lcmbin)
 end
 
 fprintf('\n--- 9. LCModel + maps ---\n');
-load('SNR.mat')
-load('map.mat')
-load('crlb.mat')
-load('LW.mat')
 
 run_lcm_rosette_portable(paths.metFile, ftSpec_smooth, ftSpec_smooth_w, mask, ...
     'basisFile',  basisFile, ...

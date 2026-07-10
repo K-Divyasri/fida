@@ -10,8 +10,8 @@ function [map,crlb,LW,SNR] = op_CSILCModelMaps(size_x,size_y,lcmodel_output_loca
 
    %Create the structure of the maps we want
     cd(lcmodel_output_location)
-    %map_list = {'Cr+PCr' 'GPC+PCh' 'NAA+NAAG' 'Glu+Gln' 'Ins'};
-    map_list = {'Lac' 'Ace' 'Cr' 'Cho'};
+    %map_list = {'Cr+PCr' 'GPC+PCh' 'NAA+NAAG' 'Glu+Gln' 'Ins' 'Glu' 'NAA'};
+    map_list = {'Lac' 'Act' 'Cr' 'Cho'};
     map_list_readable = erase(map_list,'+');
 
     % Initialise one map + crlb field per metabolite in map_list, so this

@@ -75,8 +75,8 @@ ftSpec_w = op_CSIFourierTransform(ccav_w);
 
 %% === 6. LIPID + WATER REMOVAL + B0 CORRECTION =============================
 fprintf('\n--- 6. Lipid / water removal + B0 correction ---\n');
-ftSpec_rmlip = op_CSIssp(ftSpec, 0.8, 1.88);
-ftSpec_rmw   = op_CSIRemoveLipids(ftSpec_rmlip, ...
+%ftSpec_rmlip = op_CSIssp(ftSpec, 0.8, 1.88);
+ftSpec_rmw   = op_CSIRemoveLipids(ftSpec, ...
                   'lipidPPMRange',  [4.5 5.0], ...
                   'linewidthRange', [1 10]);
 [ftSpec_B0corr, ftSpec_B0corr_w, freqMap, R2Map] = ...
@@ -91,6 +91,13 @@ ftSpec_smooth   = op_CSIApodize(ftSpec_masked,  ...
 ftSpec_smooth_w = op_CSIApodize(ftSpec_B0corr_w, ...
                        'functionType','gaussian','fullWidthHalfMax',smoothFwhm);
 op_CSIPlot(ftSpec_smooth);
+
+
+phi_deg = 180;                          % 180 flips inverted peaks
+ph = exp(1i * phi_deg * pi/180);
+ftSpec_smooth.data   = ftSpec_smooth.data   .* ph;   % global multiply -> always applies
+ftSpec_smooth_w.data = ftSpec_smooth_w.data .* ph;
+
 
 %% === 8. WRITE 4D NIFTI + OPEN VIEWER ======================================
 fprintf('\n--- 8. Writing 4D MRSI NIfTI ---\n');
@@ -141,11 +148,7 @@ save('map.mat', 'map', '-v7.3');
 save('crlb.mat', 'crlb', '-v7.3');
 save('LW.mat', 'LW', '-v7.3');
 save('SNR.mat', 'SNR', '-v7.3');
-save('map.mat', 'map', '-v7.3');
-save('crlb.mat', 'crlb', '-v7.3');
-save('LW.mat', 'LW', '-v7.3');
-save('SNR.mat', 'SNR', '-v7.3');
-save('SNR.mat', 'SNR', '-v7.3');
+
 out = create_separate_metabolite_niftis_v2(ftSpec_smooth, map, crlb, LW, SNR, ...
         paths.t1Path, paths.emptyNiiPath, paths.mapsDir);
 %nii_viewer(paths.t1Path, paths.mapsDir);

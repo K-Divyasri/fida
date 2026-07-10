@@ -9,7 +9,7 @@ smoothFwhm    = 20;          % spatial Gaussian FWHM (mm)
 % LCModel — leave lcmbin empty to skip LCModel + map generation
 
 lcmOwner      = 'Divyasri Krishnkaumar, Sunnybrook Research Institute';
-hzpppm        = 123.25;      % matches rosette data (txfrq/1e6)
+hzpppm        = 123.25;      % PLACEHOLDER ONLY - overwritten from ftSpec_smooth.txfrq before step 9
 deltat        = 0.00063;     % matches rosette data SW 1587 Hz
 nunfil        = 576;         % matches rosette data point count
 echot         = 15;          % matches rosette data TE
@@ -52,10 +52,12 @@ ftSpec_w = op_CSIFourierTransform(ccav_w);
 
 %% === 6. LIPID + WATER REMOVAL + B0 CORRECTION =============================
 fprintf('\n--- 6. Lipid / water removal + B0 correction ---\n');
-ftSpec_rmlip = op_CSIssp(ftSpec, 0.8, 1.88);
-ftSpec_rmw   = op_CSIRemoveLipids(ftSpec_rmlip, ...
+%ftSpec_rmlip = op_CSIssp(ftSpec, 0.8, 1.88);
+ftSpec_rmw   = op_CSIRemoveLipids(ftSpec, ...
                   'lipidPPMRange',  [4.5 5.0], ...
                   'linewidthRange', [1 10]);
+% tmp        = op_CSIRemoveWater(ftSpec,[4.4 5.0],50);
+% ftSpec_rmw = op_CSIRemoveLipids(tmp,'lipidPPMRange',[4.4 5.0],'linewidthRange',[5 40],'beta',5e-4);
 [ftSpec_B0corr, ftSpec_B0corr_w, freqMap, R2Map] = ...
     op_CSIB0Correction_v2(ftSpec_rmw, ftSpec_w);
 
@@ -74,6 +76,11 @@ fprintf('\n--- 8. Writing 4D MRSI NIfTI ---\n');
 mrsiout = mrsi_on_t1_map(ccav_w, ftSpec_smooth, paths.mrsiOut, paths.emptyNiiPath);
 nii_viewer(paths.t1Path, mrsiout.mrsi4D_time);
 
+lcmbin        = '/home/divya/.lcmodel/bin/lcmodel';   % e.g. '/home/divya/.lcmodel/bin/lcmodel'
+% Basis rebuilt at the data dwell (BADELT = DELTAT = 6.3e-4 s, SW 1587 Hz)
+% so LCModel no longer resamples it (kills the MYBASI 8 warning).
+basisFile     = 'C:\Users\divya\Downloads\fida codes\fid_a\basis_rosette_phantom\RosettePhantom_LacAceCrCho_TE15_SW1587.basis';
+
 
 
 %% === 9. LCMODEL + METABOLITE MAPS =========================================
@@ -82,6 +89,18 @@ if isempty(lcmbin)
     fprintf('\n=== Pipeline complete.  Outputs in %s ===\n', paths.outputDir);
     return
 end
+
+% Auto-derive LCModel timing from the data so the control matches the basis.
+% The hard-coded hzpppm=123.25 above was WRONG (real value 123.19877) and was
+% the sole remaining cause of the MYBASI 8 warning once BADELT was fixed.
+specDim = ftSpec_smooth.dims.f;
+if specDim == 0, specDim = ftSpec_smooth.dims.t; end
+hzpppm = ftSpec_smooth.txfrq / 1e6;
+deltat = 1 / ftSpec_smooth.spectralWidth;
+nunfil = ftSpec_smooth.sz(specDim);
+echot  = ftSpec_smooth.te;
+fprintf('  LCModel timing (from data): HZPPPM=%.5f  DELTAT=%.8f  NUNFIL=%d  ECHOT=%g\n', ...
+        hzpppm, deltat, nunfil, echot);
 
 fprintf('\n--- 9. LCModel + maps ---\n');
 run_lcm_rosette_portable(paths.metFile, ftSpec_smooth, ftSpec_smooth_w, mask, ...
@@ -100,6 +119,10 @@ Nx = numel(getCoordinates(ftSpec, 'x'));
 Ny = numel(getCoordinates(ftSpec, 'y'));
 [map, crlb, LW, SNR] = op_CSILCModelMaps(Nx, Ny, paths.rawFolder, ...
     'figure_folder_name', 'maps');
+save('map.mat', 'map', '-v7.3');
+save('crlb.mat', 'crlb', '-v7.3');
+save('LW.mat', 'LW', '-v7.3');
+save('SNR.mat', 'SNR', '-v7.3');
 
 out = create_separate_metabolite_niftis_v2(ftSpec_smooth, map, crlb, LW, SNR, ...
         paths.t1Path, paths.emptyNiiPath, paths.mapsDir);

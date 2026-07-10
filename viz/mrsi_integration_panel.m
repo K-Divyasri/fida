@@ -244,23 +244,29 @@ compute();      % do the initial integration over the full ppm range
 
     function styleOverlay()
         % After nii_viewer opens, switch the heatmap overlay to the "hot"
-        % colormap at full alpha (matches the in-panel heatmap).
+        % colormap at full alpha (matches the in-panel heatmap).  This is
+        % purely cosmetic, so every step is guarded -- a viewer-widget
+        % difference must never abort the panel's update callback.
         fh = findobj('Type','figure', '-regexp','Name','^nii_viewer');
         if isempty(fh), return; end
         hs = guidata(fh(1));
         if ~isstruct(hs), return; end
 
-        % nii_viewer's LUT list (see nii_viewer.m line 355):
-        %   1 gray  2 red  ...  15 HOT  16 cool ...
-        names = get(hs.files,'String');
-        idx = find(iscell(names) & contains(string(names), '_intHeatmap'), 1);
-        if ~isempty(idx)
-            set(hs.files, 'Value', idx);  fire(hs.files);
+        % Select the heatmap overlay (file name contains '_intHeatmap').
+        try
+            names = getFileList(hs.files);
+            idx   = find(contains(string(names), '_intHeatmap'), 1);
+            if ~isempty(idx)
+                set(hs.files, 'Value', idx);  fire(hs.files);
+            end
+        catch
         end
-        set(hs.lut, 'Value', 15);            fire(hs.lut);
-        try, hs.alpha.setValue(1.0);  fire(hs.alpha);  catch, end
-        try, hs.lb.setValue(0.02);    fire(hs.lb);     catch, end
-        try, hs.ub.setValue(1.0);     fire(hs.ub);     catch, end
+
+        % nii_viewer's LUT list: 15 = HOT.  Full alpha, fixed [0.02 1] window.
+        try, set(hs.lut, 'Value', 15);  fire(hs.lut);   catch, end
+        try, hs.alpha.setValue(1.0);    fire(hs.alpha); catch, end
+        try, hs.lb.setValue(0.02);      fire(hs.lb);    catch, end
+        try, hs.ub.setValue(1.0);       fire(hs.ub);    catch, end
     end
 
 
@@ -281,6 +287,27 @@ function fire(h)
     try
         if iscell(cb),                  feval(cb{1}, h, [], cb{2:end});
         elseif isa(cb,'function_handle'), cb(h, []);
+        end
+    catch
+    end
+end
+
+function names = getFileList(hfiles)
+    % Return nii_viewer's file list as a cellstr.  Works for both a classic
+    % uicontrol listbox ('String') and a JIDE CheckBoxList (no 'String'
+    % property -- read it through the list model instead).
+    names = {};
+    try
+        s = get(hfiles, 'String');          % classic listbox
+        if ~isempty(s), names = cellstr(s); return; end
+    catch
+    end
+    try
+        model = hfiles.getModel();          % JIDE CheckBoxList
+        n = model.getSize();
+        names = cell(n, 1);
+        for i = 1:n
+            names{i} = char(model.getElementAt(i-1));
         end
     catch
     end

@@ -1,9 +1,7 @@
 function show_mrsi_spectrum_onclick(hs, p, c, ax)
     % Display metabolite info OR spectrum based on data type
     % Works with both 4D and 3D metabolite formats
-    
-    fprintf('\n=== Click Display ===\n');
-    
+
     % Get coordinates safely
     ijk_bg_raw = get(hs.ijk, 'Value');
     if iscell(ijk_bg_raw)
@@ -17,8 +15,6 @@ function show_mrsi_spectrum_onclick(hs, p, c, ax)
     elseif numel(ijk_bg) < 2
         return;
     end
-    
-    fprintf('Background voxel: [%d, %d, %d]\n', ijk_bg(1), ijk_bg(2), ijk_bg(3));
     
     try
         img_size_raw = size(p.nii.img);
@@ -34,9 +30,6 @@ function show_mrsi_spectrum_onclick(hs, p, c, ax)
             % 4D or higher
             img_size = img_size_raw;
         end
-        
-        fprintf('Image size: [%s] (normalized to 4D: [%s])\n', ...
-            num2str(img_size_raw), num2str(img_size));
         
         % Transform coordinates
         if isfield(p, 'R0')
@@ -69,12 +62,9 @@ function show_mrsi_spectrum_onclick(hs, p, c, ax)
             ijk_mrsi = ijk_bg(1:3);
         end
         
-        % Panel index of the pulled ftSpec voxel (ix=a, iy=Ny-b+1) is (a, b),
-        % matching the integration panel for the same spectrum.
-        px_panel = ijk_mrsi(1);
-        py_panel = ijk_mrsi(2);
+        % Panel index of the clicked voxel == (a, b), matching the integration panel.
         fprintf('MRSI voxel: NIfTI [%d, %d, %d]   panel (%d,%d)\n', ...
-            ijk_mrsi(1), ijk_mrsi(2), ijk_mrsi(3), px_panel, py_panel);
+            ijk_mrsi(1), ijk_mrsi(2), ijk_mrsi(3), ijk_mrsi(1), ijk_mrsi(2));
 
         % Bounds check
         if ijk_mrsi(1) < 1 || ijk_mrsi(1) > img_size(1) || ...
@@ -84,42 +74,10 @@ function show_mrsi_spectrum_onclick(hs, p, c, ax)
             return;
         end
 
-        % ---- World-coordinate report (mm, RAS) for T1 and MRSI ----
-        % Purely informational. Wrapped ENTIRELY in try/catch (and indices
-        % forced to columns) so a coordinate-reporting hiccup can NEVER abort
-        % the FID/spectrum display further down.
-        try
-            w_bg = [];
-            if isfield(hs,'bg') && isfield(hs.bg,'R') && ~isempty(hs.bg.R)
-                ib = double(ijk_bg(:));                  % force column
-                w_bg = hs.bg.R * [ib(1:3)-1; 1];
-                fprintf('  T1   voxel [%3d %3d %3d] -> world [%+8.2f %+8.2f %+8.2f] mm (RAS)\n', ...
-                    ib(1), ib(2), ib(3), w_bg(1), w_bg(2), w_bg(3));
-            else
-                fprintf('  T1 world unavailable (no hs.bg.R)\n');
-            end
-            S_mrsi = get_sform_3x4(p.nii.hdr);
-            im = double(ijk_mrsi(:));                    % force column
-            w_mrsi = S_mrsi * [im(1:3)-1; 1];
-            vsz = [norm(S_mrsi(:,1)), norm(S_mrsi(:,2)), norm(S_mrsi(:,3))];
-            fprintf('  MRSI voxel [%3d %3d %3d] -> world [%+8.2f %+8.2f %+8.2f] mm (RAS)\n', ...
-                im(1), im(2), im(3), w_mrsi(1), w_mrsi(2), w_mrsi(3));
-            fprintf('  MRSI voxel size: [%.2f %.2f %.2f] mm\n', vsz(1), vsz(2), vsz(3));
-            if ~isempty(w_bg)
-                d = norm(w_bg(1:3) - w_mrsi(1:3));
-                if d <= max(vsz(1:2)), verdict = 'OK (<= one MRSI voxel)';
-                else,                  verdict = 'MISALIGNED (> one MRSI voxel)'; end
-                fprintf('  T1<->MRSI world mismatch: %.2f mm  %s\n', d, verdict);
-            end
-        catch ME
-            fprintf('  [world-coord report skipped: %s]\n', ME.message);
-        end
-
         % Get description
         descrip = '';
         if isfield(p.nii.hdr, 'descrip')
             descrip = strtrim(char(p.nii.hdr.descrip));
-            fprintf('NIfTI description: "%s"\n', descrip);
         end
         
         % DETECT DATA TYPE
@@ -140,7 +98,8 @@ function show_mrsi_spectrum_onclick(hs, p, c, ax)
                 data_type = '4D_metabolite';
                 
                 % Extract metabolite name
-                met_name = extract_metabolite_name(descrip);
+                met_name = met_name_from_filename(p);                 % name from NIfTI file name
+                if isempty(met_name), met_name = extract_metabolite_name(descrip); end
             else
                 fprintf('→ 4D signal data (will show spectrum)\n');
                 is_metabolite = false;
@@ -155,7 +114,8 @@ function show_mrsi_spectrum_onclick(hs, p, c, ax)
                 fprintf('✓ 3D CRLB map detected\n');
                 is_metabolite = true;
                 data_type = '3D_CRLB';
-                met_name = extract_metabolite_name(descrip);
+                met_name = met_name_from_filename(p);                 % name from NIfTI file name
+                if isempty(met_name), met_name = extract_metabolite_name(descrip); end
                 
             % Check for 3D Linewidth map
             elseif contains(descrip, 'Linewidth', 'IgnoreCase', true)
@@ -184,10 +144,8 @@ function show_mrsi_spectrum_onclick(hs, p, c, ax)
         
         % DISPLAY
         if is_metabolite
-            fprintf('Displaying metabolite info (type: %s)...\n', data_type);
             show_metabolite_info(hs, p, ijk_mrsi, met_name, data_type, img_size(3));
         else
-            fprintf('Displaying spectrum...\n');
             show_spectrum(hs, p, ijk_mrsi, img_size);
         end
         
@@ -229,6 +187,33 @@ function met_name = extract_metabolite_name(descrip)
     if ~isempty(tokens) && ~isempty(tokens{1})
         met_name = strtrim(tokens{1});
     end
+end
+
+%% Extract metabolite name from the NIfTI FILE NAME (preferred).
+%  create_separate_metabolite_niftis_v2 names files:
+%     <met>_4D.nii  ,  <met>_CRLB_3D.nii  ,  Linewidth_3D.nii  ,  SNR_3D.nii
+%  so the metabolite token is the basename with those suffixes stripped.
+function met_name = met_name_from_filename(p)
+    met_name = '';
+    try
+        fn = char(p.nii.hdr.file_name);
+    catch
+        return;                       % no file name available
+    end
+    [~, base, ext] = fileparts(fn);
+    if strcmpi(ext, '.gz'), [~, base] = fileparts(base); end   % .nii.gz -> drop .nii too
+    % strip the suffixes our naming convention adds (longest first)
+    base = regexprep(base, '_CRLB_3D$', '', 'ignorecase');
+    base = regexprep(base, '_4D$',      '', 'ignorecase');
+    base = regexprep(base, '_CRLB$',    '', 'ignorecase');
+    base = regexprep(base, '_3D$',      '', 'ignorecase');
+    token = strtrim(base);
+    if isempty(token), return; end
+    % give known metabolites their conventional casing; otherwise use the token
+    canon = {'NAA','NAAG','Cr','PCr','Cho','GPC','PCh','Glu','Gln','Glx', ...
+             'Ins','mI','Lac','Act','Tau','GABA','GSH','Asp','Ala'};
+    idx = find(strcmpi(token, canon), 1);
+    if ~isempty(idx), met_name = canon{idx}; else, met_name = token; end
 end
 
 %% Show metabolite info - handles both 4D and 3D formats
@@ -603,7 +588,9 @@ function show_spectrum(hs, p, ijk_mrsi, img_size)
         plot(ax_t, t_ms, real(fid), 'b-', 'LineWidth', 2);
         set(ax_t, 'XColor', 'w', 'YColor', 'w', 'Color', 'k', 'FontSize', 12, 'Box', 'off');
         xlabel(ax_t, 'Time (ms)', 'FontSize', 14, 'Color', 'w');
-        title(ax_t, sprintf('Time (Real)  panel (%d,%d)', px_p, py_p), ...
+        % trailing blank line(s) push the title above the y-axis x10^n
+        % multiplier so they don't overlap (add another '' for a bigger gap)
+        title(ax_t, {sprintf('Time (%d,%d)', px_p, py_p), '', '', ''}, ...
             'FontSize', 12, 'Color', 'w');
         xlim(ax_t, [0 max(t_ms)]);
 
@@ -615,7 +602,7 @@ function show_spectrum(hs, p, ijk_mrsi, img_size)
             set(ax_f, 'XDir', 'reverse', 'XColor', 'w', 'YColor', 'w', ...
                 'Color', 'k', 'FontSize', 12, 'Box', 'off');
             xlabel(ax_f, 'ppm', 'FontSize', 14, 'Color', 'w');
-            title(ax_f, sprintf('Spectrum (Real)  panel (%d,%d)', px_p, py_p), ...
+            title(ax_f, {sprintf('Spectrum (%d,%d)', px_p, py_p), ''}, ...
                 'FontSize', 12, 'Color', 'w');
             xlim(ax_f, [0 6]);
         end
