@@ -287,31 +287,20 @@ pos = getpixelposition(fh); pos = [1 pos(4)-64 pos(3) 64];
 hs.panel = uipanel(fh, 'Units', 'pixels', 'Position', pos, 'BorderType', 'none');
 hs.focus = uicontrol(hs.panel, 'Style', 'text'); % dummy uicontrol for focus
 
-% file list by JIDE CheckBoxList: check/selection independent
-mdl = handle(javax.swing.DefaultListModel, 'CallbackProperties'); % dynamic item
-mdl.add(0, niiName);
-mdl.IntervalAddedCallback   = cb('width');
-mdl.IntervalRemovedCallback = cb('width');
-mdl.ContentsChangedCallback = cb('width'); % add '(mask)' etc
-h = handle(com.jidesoft.swing.CheckBoxList(mdl), 'CallbackProperties');
-h.setFont(java.awt.Font('Tahoma', 0, 11));
-% h.ClickInCheckBoxOnly = true; % it's default
-h.setSelectionMode(0); % single selection
-h.setSelectedIndex(0); % 1st highlighted
-h.addCheckBoxListSelectedIndex(0); % check it
-h.ValueChangedCallback = cb('file'); % selection change
-h.MouseReleasedCallback = @(~,~)uicontrol(hs.focus); % move focus away
-% h.Focusable = false;
-h.setToolTipText(['<html>Select image to show/modify its display ' ...
-    'parameters.<br>Click checkbox to turn on/off image']);
-jScroll = com.mathworks.mwswing.MJScrollPane(h); %#ok<*JAPIMATHWORKS>
-width = h.getPreferredScrollableViewportSize.getWidth;
+% file list: native checkbox-per-row list (check = show/hide, independent of
+% which row is selected for editing its display parameters)
+width = 130; % initial guess; refined right after construction below
+hs.files = NiiCheckBoxList(hs.panel, [2 4 width 60], niiName, ...
+    ['<html>Select image to show/modify its display ' ...
+     'parameters.<br>Click checkbox to turn on/off image'], hs.focus);
+hs.files.ValueChangedCallback = cb('file');   % selection change
+hs.files.ToggleCallback = cb('toggle');       % check/uncheck
+hs.files.ModelChangedCallback = cb('width');  % item added/removed/renamed
+width = hs.files.getPreferredWidth;
 width = max(60, min(width+20, pos(3)-408)); % 20 pixels for vertical scrollbar
-warning('off', 'MATLAB:ui:javacomponent:FunctionToBeRemoved');
-[~, hs.scroll] = javacomponent(jScroll, [2 4 width 60], hs.panel); %#ok<*JAVCM>
-hCB = handle(h.getCheckBoxListSelectionModel, 'CallbackProperties');
-hCB.ValueChangedCallback = cb('toggle'); % check/uncheck
-hs.files = javaObjectEDT(h); % trick to avoid java error by Yair
+hs.files.Panel.Position(3) = width;
+hs.files.updateUI; % relayout rows to the refined width
+hs.scroll = hs.files.Panel; % real graphics handle for hs.scroll.Position(3) call sites
 
 % panel for controls except hs.files
 pos = [width 1 pos(3)-width pos(4)];
@@ -346,7 +335,7 @@ for i = 1:3
 end
 
 % Controls for each file
-h = hs.files.SelectionBackground; fClr = [h.getRed h.getGreen h.getBlue]/255;
+fClr = hs.files.SelectionBackground;
 uicontrol(ph, 'Style', 'frame', 'Position', [1 5 412 32], 'ForegroundColor', fClr);
 hs.lb = java_spinner([7 10 48 22], [p.lb -inf inf p.lb_step], ph, ...
     cb('lb'), p.numFmt, 'min value (threshold)');
@@ -526,14 +515,23 @@ uimenu(h, 'Label', 'About', 'Callback', cb('about'));
 guidata(fh, hs); % store handles and data
 
 %% java_dnd based on dndcontrol at matlabcentral/fileexchange/53511
+% There is no public, non-Java MATLAB API for OS-level file drag-and-drop
+% onto a classic figure, so this feature stays Java/JavaFrame-based. On a
+% MATLAB version where JavaFrame has been fully removed, both attempts below
+% fail and drag-and-drop is silently unavailable instead of crashing startup.
+jFrame = [];
 try % panel has JavaFrame in later matlab
     warning('off', 'MATLAB:ui:javaframe:PropertyToBeRemoved');
     jFrame = handle(hs.frame.JavaFrame.getGUIDEView, 'CallbackProperties');
 catch
-    warning('off', 'MATLAB:HandleGraphics:ObsoletedProperty:JavaFrame');
-    jFrame = fh.JavaFrame.getAxisComponent; %#ok<*JAVFM>
+    try
+        warning('off', 'MATLAB:HandleGraphics:ObsoletedProperty:JavaFrame');
+        jFrame = fh.JavaFrame.getAxisComponent; %#ok<*JAVFM>
+    catch
+        jFrame = []; % JavaFrame fully removed on this MATLAB version
+    end
 end
-if usejava('awt')
+if ~isempty(jFrame) && usejava('awt')
     try java_dnd(jFrame, cb('drop')); catch me, disp(me.message); end
 end
 
@@ -891,7 +889,7 @@ switch cmd
                 error('Unknown stack level: %s', get(h, 'Tag'));
         end
         
-        str = cell(hs.files.getModel.toArray);
+        str = hs.files.getModel.toArray;
         str = str(ind);
         for j = 1:n, hs.files.getModel.set(j-1, str{j}); end
 
@@ -1104,11 +1102,11 @@ switch cmd
         xlabel('Voxel values'); ylabel('Probability density');
         title('Histogram between min and max values');
     case 'width' % adjust hs.scroll width
-        hs.files.updateUI;
         width = hs.panel.Position(3);
-        x = hs.files.getPreferredScrollableViewportSize.getWidth;
+        x = hs.files.getPreferredWidth;
         x = max(60, min(x+20, width-408)); % 408 width of the little panel
         hs.scroll.Position(3) = x;
+        hs.files.updateUI; % relayout rows to the new width
         hs.params.Position([1 3]) = [x+2 width-x-2];
         hs.value.Position(3) = max(1, width-x-hs.value.Position(1));
     case 'saveVolume' % save 1 or more volumes as a nifti
@@ -1193,14 +1191,12 @@ switch cmd
         set(hs.lb.Model, 'StepSize', p.lb_step);
         set(hs.ub.Model, 'StepSize', p.ub_step);
         % --- update the spinner DISPLAY PRECISION to match this overlay ---
-        % The decimal format is baked into a NumberEditor at creation time, so
-        % it must be rebuilt here or the boxes keep the first image's '#.##'.
+        % The decimal format is applied at spinner creation time, so it must
+        % be reset here or the boxes keep the first image's '#.##'.
         if isfield(p,'numFmt') && ~isempty(p.numFmt)
             try
-                hs.lb.setEditor(javaObject('javax.swing.JSpinner$NumberEditor', hs.lb, p.numFmt));
-                hs.ub.setEditor(javaObject('javax.swing.JSpinner$NumberEditor', hs.ub, p.numFmt));
-                hs.lb.setFont(java.awt.Font('Tahoma',0,11));
-                hs.ub.setFont(java.awt.Font('Tahoma',0,11));
+                hs.lb.setEditor(p.numFmt);
+                hs.ub.setEditor(p.numFmt);
                 set(hs.lb, 'Value', p.lb);  set(hs.ub, 'Value', p.ub); % re-apply after editor swap
                 fprintf('[nii_viewer dbg] file-switch OK: numFmt=%s  lb_step=%.6g  ub_step=%.6g  lb=%.6g ub=%.6g\n', ...
                         p.numFmt, p.lb_step, p.ub_step, p.lb, p.ub);
@@ -1346,15 +1342,7 @@ switch evt.Key
     case 'f1'
         doc nii_viewer;
     case 'tab' % prevent tab from cycling uicontrol
-        mousexy = get(0, 'PointerLocation'); % for later restore
-        posF = getpixelposition(fh);
-        posA = getpixelposition(hs.ax(4), true); % relative to figure
-        c = posF(1:2) + posA(1:2) + posA(3:4)/2; % ax(4) center xy
-        res = screen_pixels;
-        rob = java.awt.Robot();
-        rob.mouseMove(c(1), res(2)-c(2));
-        rob.mousePress(16); rob.mouseRelease(16); % BUTTON1
-        set(0, 'PointerLocation', mousexy); % restore mouse location
+        uicontrol(hs.focus); % move focus to the dummy control, same trick used elsewhere
 end
 
 %% update CData/AlphaData for 1 or 3 of the sag/cor/tra views
@@ -1824,14 +1812,8 @@ function h = java_spinner(pos, val, parent, callback, fmt, helpTxt)
 %  val: [curVal min max step]
 %  parent: figure or panel
 %  fmt: '#' for integer, or '#.#', '#.##'
-mdl = javax.swing.SpinnerNumberModel(val(1), val(2), val(3), val(4));
-% jSpinner = javax.swing.JSpinner(mdl);
-jSpinner = com.mathworks.mwswing.MJSpinner(mdl);
-h = javacomponent(jSpinner, pos, parent);
-set(h, 'StateChangedCallback', callback, 'ToolTipText', helpTxt);
-jEditor = javaObject('javax.swing.JSpinner$NumberEditor', h, fmt);
-h.setEditor(jEditor);
-h.setFont(java.awt.Font('Tahoma', 0, 11));
+h = NiiSpinner(pos, val, parent, fmt, helpTxt);
+h.StateChangedCallback = callback; % set after construction: no fire on initial value
 
 %% Estimate lower and upper bound of img display
 function rg = get_range(nii, isLabel)
@@ -3372,10 +3354,15 @@ switch cmd
                 h = findobj(hs.fig, 'Type', 'uimenu', 'Label', 'Zoom out');
                 cii_view_cb(h, [], 'zoomG');
             elseif any(strcmp(ev.Key, {'a' 'r'}))
+                % Forward to the main figure's Add/Remove overlay menu action
+                % directly (was: simulate the Ctrl+A/Ctrl+R accelerator via
+                % Robot-injected OS keypress).
                 figure(hs.hsN.fig);
-                key = java.awt.event.KeyEvent.(['VK_' upper(ev.Key)]);
-                java.awt.Robot().keyPress(key);
-                java.awt.Robot().keyRelease(key);
+                if strcmp(ev.Key, 'a'), lbl = 'Add overlay'; c = 'add';
+                else, lbl = 'Remove overlay'; c = 'close';
+                end
+                h = findobj(hs.hsN.fig, 'Type', 'uimenu', 'Label', lbl);
+                nii_viewer_cb(h, [], c, hs.hsN.fig);
             end
         elseif any(strcmp(ev.Key, {'space' 'comma' 'period'}))
             KeyPressFcn(hs.hsN.fig, ev);
