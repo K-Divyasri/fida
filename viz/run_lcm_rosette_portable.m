@@ -29,6 +29,9 @@ function run_lcm_rosette_portable(fileName, ftSpec_smooth, ftSpec_smooth_w, mask
         cfg.rawFolder = fullfile(workDir, [fileBase '_LCModel_RAW']);
         fprintf('rawFolder not specified. Defaulting to:\n        %s\n', cfg.rawFolder);
     end
+    if ~cfg.useWSL
+        cfg.rawFolder = expandTilde(cfg.rawFolder);
+    end
 
     rawFolder = cfg.rawFolder;
     if ~exist(rawFolder, 'dir')
@@ -178,6 +181,8 @@ function cfg = parseInputs(varargin)
         cfg.basisFile_exec  = win2wsl(cfg.basisFile);
         cfg.lcmodelBin_exec = cfg.lcmodelBin;   % always a WSL/POSIX path
     else
+        cfg.basisFile  = expandTilde(cfg.basisFile);
+        cfg.lcmodelBin = expandTilde(cfg.lcmodelBin);
         if looksLikeWindowsPath(cfg.basisFile)
             warning(['basisFile looks like a Windows path (%s) ' ...
                      'but OS is %s. Did you mean to set useWSL=true?'], cfg.basisFile, os);
@@ -343,6 +348,21 @@ function linuxPath = win2wsl(winPath)
         return;
     end
     linuxPath = wp;
+end
+
+function p = expandTilde(p)
+    % Neither MATLAB nor a quoted shell string expands a leading '~' —
+    % resolve it here so no literal tilde ever reaches system().
+    if isstring(p), p = char(p); end
+    if ~isempty(p) && p(1) == '~'
+        home = getenv('HOME');
+        if isempty(home), home = getenv('USERPROFILE'); end
+        if numel(p) == 1
+            p = home;
+        elseif p(2) == '/' || p(2) == '\'
+            p = fullfile(home, p(3:end));
+        end
+    end
 end
 
 function tf = looksLikeWindowsPath(p)
