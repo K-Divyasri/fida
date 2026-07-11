@@ -257,7 +257,7 @@ compute();      % do the initial integration over the full ppm range
             names = getFileList(hs.files);
             idx   = find(contains(string(names), '_intHeatmap'), 1);
             if ~isempty(idx)
-                set(hs.files, 'Value', idx);  fire(hs.files);
+                hs.files.setSelectedIndex(idx-1); % 0-based; fires the "file" callback itself
             end
         catch
         end
@@ -293,9 +293,10 @@ function fire(h)
 end
 
 function names = getFileList(hfiles)
-    % Return nii_viewer's file list as a cellstr.  Works for both a classic
-    % uicontrol listbox ('String') and a JIDE CheckBoxList (no 'String'
-    % property -- read it through the list model instead).
+    % Return nii_viewer's file list as a cellstr. Works for a classic
+    % uicontrol listbox ('String'), nii_viewer's native NiiCheckBoxList
+    % (getModel/size/get, 0-based), and the older JIDE CheckBoxList
+    % (getSize/getElementAt) for back-compat with any older nii_viewer copy.
     names = {};
     try
         s = get(hfiles, 'String');          % classic listbox
@@ -303,7 +304,17 @@ function names = getFileList(hfiles)
     catch
     end
     try
-        model = hfiles.getModel();          % JIDE CheckBoxList
+        model = hfiles.getModel();
+        n = model.size;                     % NiiCheckBoxList
+        names = cell(n, 1);
+        for i = 1:n
+            names{i} = char(model.get(i-1));
+        end
+        return;
+    catch
+    end
+    try
+        model = hfiles.getModel();          % older JIDE CheckBoxList
         n = model.getSize();
         names = cell(n, 1);
         for i = 1:n
