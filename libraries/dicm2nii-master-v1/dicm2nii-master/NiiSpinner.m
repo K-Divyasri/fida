@@ -1,4 +1,8 @@
-classdef NiiSpinner < handle
+classdef NiiSpinner < matlab.mixin.SetGet
+% matlab.mixin.SetGet (not plain handle) so generic get(obj,'Prop') /
+% set(obj,'Prop',val) function-call syntax works and routes through the
+% property accessors below -- nii_viewer.m calls spinners both ways
+% (obj.Value and get(obj,'Value')/set(obj,'Value',v)).
 % Native (pure-uicontrol) replacement for the MJSpinner/javacomponent-based
 % number spinner nii_viewer.m used to build via the old java_spinner() local
 % function. Exposes the same property/method surface (Value, Model,
