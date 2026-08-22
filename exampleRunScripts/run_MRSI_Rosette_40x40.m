@@ -1,10 +1,13 @@
-datasetFolder = 'F:\fida\divya\20260605_phantom_test\subject02';
+datasetFolder = 'F:\fida\divya\newPhantom_20251119 - Copy\subject07';
 kFile         = 'C:\Users\divya\Downloads\fida codes\fid_a\processingTools\MRSI\kFiles\Rosette_traj_40x40.txt';
 
 % Reconstruction choices
 dcfMethod     = 'pipe_menon';        % 'nn' | 'voronoi' | 'pipe_menon' | 'none'
 ftMethod      = 'nufft';     % 'nufft' | 'dft' | 'tikhonov'   (tikhonov auto-skips DCF)
-smoothFwhm    = 20;          % spatial Gaussian FWHM (mm)
+smoothFwhm    = 20;           % spatial Gaussian FWHM (mm). 0 = NO smoothing.
+                             % 20 mm blends the inner/outer bottles (partial
+                             % volume) and wrecks per-compartment mM. Use 0 for
+                             % quantification; a bigger value only for overlays.
 
 % LCModel — leave lcmbin empty to skip LCModel + map generation
 
@@ -45,10 +48,21 @@ ccav.mask = ccav_w.mask;
 
 mask   = ccav_w.mask.brainmasks;
 
+%% === 4b. LEFT-SHIFT (time domain, before spectral FT) =====================
+% Left-shift removes the FID first-point 1st-order phase (ADC/echo delay).
+% NOTE: zero-fill moved to AFTER B0 correction (step 6) so lipid removal and
+% B0 run on the short native FID (fast, no zero-padded region to distort);
+% only the final spectrum is interpolated. See op_CSIspecZeroFill.
+fprintf('\n--- 4b. Left-shift ---\n');
+ccav   = op_CSIleftshift(ccav);            % uses ccav.pointsToLeftshift
+ccav_w = op_CSIleftshift(ccav_w);
+
 %% === 5. SPECTRAL FT =======================================================
 fprintf('\n--- 5. Spectral FT ---\n');
 ftSpec   = op_CSIFourierTransform(ccav);
 ftSpec_w = op_CSIFourierTransform(ccav_w);
+save('ftSpec.mat', 'ftSpec', '-v7.3');
+save('ftSpec_w.mat', 'ftSpec_w', '-v7.3');
 
 %% === 6. LIPID + WATER REMOVAL + B0 CORRECTION =============================
 fprintf('\n--- 6. Lipid / water removal + B0 correction ---\n');
@@ -61,14 +75,29 @@ ftSpec_rmw   = op_CSIRemoveLipids(ftSpec, ...
 [ftSpec_B0corr, ftSpec_B0corr_w, freqMap, R2Map] = ...
     op_CSIB0Correction_v2(ftSpec_rmw, ftSpec_w);
 
+% Zero-fill NOW (after B0), interpolating the processed spectrum 576 -> 4096
+% for finer ppm sampling / better LCModel peak separation. Padding the native
+fprintf('  Zero-fill (spectral) 576 -> 4096 ...\n');
+ftSpec_B0corr   = op_CSIspecZeroFill(ftSpec_B0corr,   4096);
+ftSpec_B0corr_w = op_CSIspecZeroFill(ftSpec_B0corr_w, 4096);
+
 ftSpec_masked = op_CSIapplymask(ftSpec_B0corr);
 
 %% === 7. SPATIAL SMOOTHING =================================================
-fprintf('\n--- 7. Spatial smoothing (Gaussian, FWHM=%g mm) ---\n', smoothFwhm);
-ftSpec_smooth   = op_CSIApodize(ftSpec_masked,  ...
-                       'functionType','gaussian','fullWidthHalfMax',smoothFwhm);
-ftSpec_smooth_w = op_CSIApodize(ftSpec_B0corr_w, ...
-                       'functionType','gaussian','fullWidthHalfMax',smoothFwhm);
+% op_CSIApodize divides by sigma, so FWHM=0 would blow up. Skip it entirely
+% when smoothFwhm<=0 and pass the un-smoothed spectra straight through (the
+% variables keep the _smooth name so steps 8-9 need no change).
+if smoothFwhm > 0
+    fprintf('\n--- 7. Spatial smoothing (Gaussian, FWHM=%g mm) ---\n', smoothFwhm);
+    ftSpec_smooth   = op_CSIApodize(ftSpec_masked,  ...
+                           'functionType','gaussian','fullWidthHalfMax',smoothFwhm);
+    ftSpec_smooth_w = op_CSIApodize(ftSpec_B0corr_w, ...
+                           'functionType','gaussian','fullWidthHalfMax',smoothFwhm);
+else
+    fprintf('\n--- 7. Spatial smoothing: SKIPPED (smoothFwhm=%g) ---\n', smoothFwhm);
+    ftSpec_smooth   = ftSpec_masked;
+    ftSpec_smooth_w = ftSpec_B0corr_w;
+end
 op_CSIPlot(ftSpec_smooth);
 
 %% === 8. WRITE 4D NIFTI + OPEN VIEWER ======================================
@@ -113,12 +142,18 @@ run_lcm_rosette_portable(paths.metFile, ftSpec_smooth, ftSpec_smooth_w, mask, ..
     'nunfil',     nunfil, ...
     'echot',      echot, ...
     'ppmst',      ppmst, ...
-    'ppmend',     ppmend);
+    'ppmend',     ppmend, ...
+    'doecc',      false);   % LCModel eddy-current OFF: op_CSIB0Correction_v2
+                            % already did the water-phase (Klose) correction
+                            % in-pipeline, and DOECC=T would divide the metab
+                            % FID by the zero-filled water tail (0/0 -> NaN ->
+                            % SOLVE FATAL). DOWS/water scaling stays ON.
 
 Nx = numel(getCoordinates(ftSpec, 'x'));
 Ny = numel(getCoordinates(ftSpec, 'y'));
 [map, crlb, LW, SNR] = op_CSILCModelMaps(Nx, Ny, paths.rawFolder, ...
     'figure_folder_name', 'maps');
+apply_water_scaling_all;   % was apply_water_scaling_all
 save('map.mat', 'map', '-v7.3');
 save('crlb.mat', 'crlb', '-v7.3');
 save('LW.mat', 'LW', '-v7.3');

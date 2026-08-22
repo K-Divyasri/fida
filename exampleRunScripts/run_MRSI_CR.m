@@ -130,7 +130,7 @@ Nx = numel(getCoordinates(ftSpec, 'x'));
 Ny = numel(getCoordinates(ftSpec, 'y'));
 [map, crlb, LW, SNR] = op_CSILCModelMaps(Nx, Ny, paths.rawFolder, ...
     'figure_folder_name', 'maps');
-
+apply_water_scaling_all;
 save('SNR.mat', 'SNR', '-v7.3');
 save('map.mat', 'map', '-v7.3');
 save('crlb.mat', 'crlb', '-v7.3');

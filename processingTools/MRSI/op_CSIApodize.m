@@ -46,6 +46,16 @@ function MRSIStruct = op_CSIApodize(MRSIStruct, filterArguments)
                 xCoordinate = getCoordinates(MRSIStruct, 'x');
                 yCoordinate = getCoordinates(MRSIStruct, 'y');
 
+                % Centre the smoothing kernel on the grid. getCoordinates carries
+                % the imageOrigin (off-centre FOV) offset; using it directly puts
+                % the Gaussian peak at imageOrigin, and the conv2 below then
+                % TRANSLATES the image by imageOrigin (~cm for a shifted/tilted
+                % FOV) -- ftSpec ends up shifted while ccav_w (no apodize) stays
+                % centred. Subtracting the mean recovers the symmetric FOV
+                % coordinates, so smoothing blurs without moving the image.
+                xCoordinate = xCoordinate - mean(xCoordinate);
+                yCoordinate = yCoordinate - mean(yCoordinate);
+
                 %shift back into k-space
                 xWeights = gaussian(xCoordinate, sigma);
                 xWeights = fftshift(fft(fftshift(xWeights)));

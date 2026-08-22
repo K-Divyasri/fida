@@ -56,7 +56,18 @@ RF(:,2)=-imag(in.fids(:,1));
 
 
 %write to txt file for jmrui
-fid=fopen(outfile,'w+');
+% Retry fopen: on external/network drives (e.g. F:) a transient I/O drop
+% returns fid==-1, which otherwise crashes the whole run at the first fprintf.
+fid = -1;
+for attempt = 1:5
+    fid = fopen(outfile,'w+');
+    if fid ~= -1, break; end
+    pause(0.2);
+end
+if fid == -1
+    error('io_writelcm:fopen', ...
+          'Could not open "%s" for writing after 5 tries (drive dropped?). Move data to a local drive (C:).', outfile);
+end
 fprintf(fid,' $SEQPAR');
 %fprintf(fid,'\n\nFilename: %s' ,outfile);
 %fprintf(fid,'\n\nPointsInDataset: %i',length(data_struct.fids));

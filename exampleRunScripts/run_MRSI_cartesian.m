@@ -60,18 +60,20 @@ coilCombined                     = op_CSICombineCoils1(ft, 1, phase, weights);
 
 %% === 4. AVERAGE + WATER MASK ==============================================
 fprintf('\n--- 4. Averaging + water mask ---\n');
-ccav   = op_CSIAverage(coilCombined);
-ccav_w = op_CSIAverage(coilCombined_w);
-ccav_w = op_CSISegment_simple(ccav_w);
+ccav1   = op_CSIAverage(coilCombined);
+ccav_w1 = op_CSIAverage(coilCombined_w);
+ccav_w1 = op_CSISegment_simple(ccav_w1);
 %ccav_w.mask.brainmasks=ccav_w.mask.brainmask;
-ccav.mask = ccav_w.mask;
+ccav1.mask = ccav_w1.mask;
 
-mask   = ccav_w.mask.brainmasks;
+mask   = ccav_w1.mask.brainmasks;
+
+
 
 %% === 5. SPECTRAL FT =======================================================
 fprintf('\n--- 5. Spectral FT ---\n');
-ftSpec   = op_CSIFourierTransform(ccav);
-ftSpec_w = op_CSIFourierTransform(ccav_w);
+ftSpec   = op_CSIFourierTransform(ccav1);
+ftSpec_w = op_CSIFourierTransform(ccav_w1);
 
 %% === 6. LIPID + WATER REMOVAL + B0 CORRECTION =============================
 fprintf('\n--- 6. Lipid / water removal + B0 correction ---\n');
@@ -144,6 +146,7 @@ Nx = numel(getCoordinates(ftSpec, 'x'));
 Ny = numel(getCoordinates(ftSpec, 'y'));
 [map, crlb, LW, SNR] = op_CSILCModelMaps(Nx, Ny, paths.rawFolder, ...
     'figure_folder_name', 'maps');
+apply_water_scaling_all;
 save('map.mat', 'map', '-v7.3');
 save('crlb.mat', 'crlb', '-v7.3');
 save('LW.mat', 'LW', '-v7.3');
@@ -153,6 +156,6 @@ out = create_separate_metabolite_niftis_v2(ftSpec_smooth, map, crlb, LW, SNR, ..
         paths.t1Path, paths.emptyNiiPath, paths.mapsDir);
 %nii_viewer(paths.t1Path, paths.mapsDir);
 nii_viewer(paths.t1Path, out.metabolite_4d_files);
-allMaps = [out.metabolite_4d_files, out.crlb_3d_files,{out.shared_lw_3d_file, out.shared_snr_3d_file}];
-nii_viewer(paths.t1Path, allMaps);
+% allMaps = [out.metabolite_4d_files, out.crlb_3d_files,{out.shared_lw_3d_file, out.shared_snr_3d_file}];
+% nii_viewer(paths.t1Path, allMaps);
 fprintf('\n=== Pipeline complete.  Outputs in %s ===\n', paths.outputDir);

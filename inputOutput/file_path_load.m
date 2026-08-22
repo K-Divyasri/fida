@@ -120,16 +120,49 @@ function t1 = pickT1(imgRefDir)
     nii = [dir(fullfile(imgRefDir,'*.nii.gz')); dir(fullfile(imgRefDir,'*.nii'))];
     if isempty(nii), t1 = ''; return; end
 
-    % Prefer files matching mprage / t1 keywords
-    keys = {'mprage','t1w','t1_'};
-    for k = 1:numel(keys)
-        m = nii(contains({nii.name}, keys{k}, 'IgnoreCase', true));
-        if ~isempty(m)
-            t1 = fullfile(m(1).folder, m(1).name);
-            return
-        end
+    names = {nii.name};
+    % Deterministic ranking. Alphabetical order picked whatever sorted first,
+    % which differs between exports (a bare t1_..._0.nii.gz sorts before the
+    % _MPR_cor reformat because '.' < '_') and can flip/shift the overlay.
+    % Rank instead: mprage/t1 keyword first, prefer a coronal reformat, and
+    % PENALISE the non-distortion-corrected (_ND) copies.
+    score = zeros(1, numel(names));
+    for i = 1:numel(names)
+        n = lower(names{i}); s = 0;
+        if contains(n,'mprage')||contains(n,'t1w')||contains(n,'t1_'), s = s + 100; end
+        if contains(n,'mpr_cor'), s = s + 40;                % same reformat as before
+        elseif contains(n,'mpr_tra'), s = s + 30;
+        elseif contains(n,'mpr_sag'), s = s + 20; end
+        if contains(n,'_nd'), s = s - 50; end                % avoid _ND variants
+        score(i) = s;
     end
+    [~, order] = sort(score, 'descend');                     % stable: ties keep dir() order
+    chosen = nii(order(1));
+    t1 = fullfile(chosen.folder, chosen.name);
 
-    % Fallback: first .nii(.gz) found
-    t1 = fullfile(nii(1).folder, nii(1).name);
+    % Some exports write a 4D anatomical (e.g. 2 volumes). nii_viewer/overlay
+    % expect 3D; take volume 1 and write a 3D sidecar so geometry is unambiguous.
+    t1 = ensure3D(t1);
+end
+
+function p = ensure3D(p)
+    try
+        h = nii_tool('hdr', p);
+        nvol = double(h.dim(5));
+        if h.dim(1) >= 4 && nvol > 1
+            [d,n,e] = fileparts(p);
+            if strcmpi(e,'.gz'), [~,n2,e2] = fileparts(n); n = n2; e = [e2 e]; end
+            out = fullfile(d, [n '_vol1' e]);
+            if exist(out,'file') ~= 2
+                v = nii_tool('load', p);
+                v.img = v.img(:,:,:,1);
+                v.hdr.dim(1) = 3; v.hdr.dim(5) = 1;
+                nii_tool('save', v, out);
+                fprintf('[pickT1] 4D T1 (%d vols) -> wrote 3D volume-1: %s\n', nvol, out);
+            end
+            p = out;
+        end
+    catch ME
+        warning('pickT1:ensure3D','Could not 3D-ify %s (%s) -- using as-is.', p, ME.message);
+    end
 end
