@@ -62,7 +62,41 @@ function run_lcm_rosette_portable(fileName, ftSpec_smooth, ftSpec_smooth_w, mask
     nvox = numel(loc_x);
     fprintf('Processing %d voxels.\n', nvox);
 
-    for k = 1:nvox
+    %---------------------------------------------------------------------%
+    % 5a. Detect the REAL (non-zero-filled) FID length from the water
+    %     reference (cleanly zero-padded). We KEEP all zero-filled points
+    %     (finer freq grid -> better LCModel peak separation), but the padded
+    %     TAIL must be conditioned before LCModel sees it:
+    %       * metabolite tail -> exact zeros (removes a processing-artifact
+    %         spike that otherwise appears at the highest frequency);
+    %       * water tail -> a small smooth exponential decay instead of hard
+    %         zeros, so |water| > 0 everywhere. With DOECC=T, LCModel divides
+    %         the metabolite FID by the water reference; EXACT zeros there give
+    %         0/0 = NaN -> "SOLVE" FATAL on every voxel. The decay is ~1e-6 of
+    %         signal, sits outside the [PPMST PPMEND] fit window, and adds
+    %         negligible area to the water-scaling integral.
+    %     NUNFIL stays at the full zero-filled length.
+    %---------------------------------------------------------------------%
+    realN = ftSpec_smooth.sz(1);
+    try
+        probe    = op_CSItoMRS(ftSpec_smooth_w, loc_x(1), loc_y(1));
+        wf       = abs(probe.fids(:,1));
+        lastReal = find(wf > 1e-6*max(wf), 1, 'last');
+        if ~isempty(lastReal), realN = lastReal; end
+    catch
+    end
+    if realN < ftSpec_smooth.sz(1)
+        fprintf(['LCModel RAW: keeping %d points (NUNFIL); conditioning ' ...
+                 'zero-fill tail past pt %d (metab->0, water->decay).\n'], ...
+                ftSpec_smooth.sz(1), realN);
+    end
+
+    % parfor with M workers: M=Inf uses the open parpool (parallel), M=0 runs
+    % serially. Each iteration touches only its own unique xXy files, so there
+    % is no cross-iteration dependency.
+    parWorkers = 0;
+    if cfg.parallel, parWorkers = Inf; end
+    parfor (k = 1:nvox, parWorkers)
         vx = loc_x(k);
         vy = loc_y(k);
 
@@ -73,8 +107,13 @@ function run_lcm_rosette_portable(fileName, ftSpec_smooth, ftSpec_smooth_w, mask
         fprintf('\n=== Voxel %d / %d  (%d,%d) ===\n', k, nvox, vx, vy);
         fprintf('  Writing RAW: %s\n', rawfile1);
 
-        io_writelcm(op_CSItoMRS(ftSpec_smooth,   vx, vy), rawfile1, ftSpec_smooth.te);
-        io_writelcm(op_CSItoMRS(ftSpec_smooth_w, vx, vy), rawfile2, ftSpec_smooth_w.te);
+        try
+            io_writelcm(conditionTail(op_CSItoMRS(ftSpec_smooth,   vx, vy), realN, false), rawfile1, ftSpec_smooth.te);
+            io_writelcm(conditionTail(op_CSItoMRS(ftSpec_smooth_w, vx, vy), realN, true ), rawfile2, ftSpec_smooth_w.te);
+        catch ME
+            fprintf('  SKIP voxel (%d,%d): RAW write failed (%s)\n', vx, vy, ME.message);
+            continue
+        end
 
         %--- Build + run shell command ---%
         if cfg.useWSL
@@ -141,7 +180,19 @@ function cfg = parseInputs(varargin)
     cfg.ppmst      = 4.25;
     cfg.ppmend     = 0.2;
     cfg.wconc      = 55556;   % water concentration for water scaling (mM); pure water
+    cfg.atth2o     = 1.0;     % water signal attenuation in the ref scan (T1/T2);
+                              % 1.0 = no correction. Compute per scan with
+                              % lcm_water_scaling(TE,TR,...) and pass 'atth2o'.
+    cfg.doecc      = true;    % LCModel eddy-current correction (DOECC). ON: the
+                              % water reference corrects each voxel's phase /
+                              % lineshape distortion, homogenising the fitted
+                              % concentrations (uncorrected eddy currents were
+                              % making Cr vary voxel-to-voxel). Pass 'doecc',
+                              % false if it adds ringing on cleaner data.
     cfg.useWSL     = ispc();
+    cfg.parallel   = false;   % true -> run voxels with parfor (needs Parallel
+                              % Computing Toolbox + an open parpool). Each voxel
+                              % is independent (unique xXy files), so it's safe.
 
     % ---- Parse name-value pairs ------------------------------------------
     validKeys = fieldnames(cfg);
@@ -229,6 +280,7 @@ function writeBashScript(outPath, cfg)
     wl(sprintf('PPMST="%g"',        cfg.ppmst));
     wl(sprintf('PPMEND="%g"',       cfg.ppmend));
     wl(sprintf('WCONC="%g"',        cfg.wconc));
+    wl(sprintf('ATTH2O="%.4f"',     cfg.atth2o));
     wl('');
 
     wl('WS_STEM="${1:?need WS stem}"');
@@ -306,10 +358,17 @@ function writeBashScript(outPath, cfg)
     wl('  echo "CHUSE1(2)=''Cho''"');
     wl('  echo "CHUSE1(3)=''Lac''"');
     wl('  if [[ "$ECC" -eq 1 ]]; then');
-    wl('    echo "DOECC=T"');
+    % Eddy-current correction decoupled from water scaling. DOECC was adding
+    % ringing around the peaks (prof feedback); DOWS stays ON so quantification
+    % is still water-scaled. Toggle with cfg.doecc.
+    if cfg.doecc
+        wl('    echo "DOECC=T"');
+    else
+        wl('    echo "DOECC=F"');
+    end
     wl('    echo "DOWS=T"');
     wl('    echo "FILH2O=''${W_PATH}''"');
-    wl('    echo "ATTH2O=1.0"');
+    wl('    echo "ATTH2O=${ATTH2O}"');
     wl('    echo "WCONC=${WCONC}"');
     wl('  fi');
     wl('  echo ''$END''');
@@ -390,4 +449,29 @@ function fixLineEndings_WSL(scriptWSL)
         sprintf('command -v dos2unix >/dev/null 2>&1 && dos2unix %s >/dev/null 2>&1; chmod +x %s >/dev/null 2>&1', ...
         bashDQ(scriptWSL), bashDQ(scriptWSL))));
     system(tryCmd);
+end
+
+function MRS = conditionTail(MRS, realN, isWater)
+%CONDITIONTAIL  Condition the zero-filled tail of a single-voxel FID before the
+% LCModel RAW is written. Keeps the FULL point count (finer freq grid); only
+% points realN+1:end (the zero-fill) are touched.
+%   isWater=false : tail -> exact zeros (clean zero-fill; drops artifact spike).
+%   isWater=true  : tail -> small smooth decay so |water| > 0 everywhere, so a
+%                   DOECC=T eddy-current correction never divides by an exact
+%                   zero. FID(0) is untouched, so DOWS water scaling is
+%                   unchanged; the decay sits outside the fit window.
+    if ~isfield(MRS,'fids') || isempty(MRS.fids), return; end
+    f = MRS.fids(:,1);
+    N = numel(f);
+    if realN >= N || realN < 1, return; end
+    if isWater
+        env = abs(f(realN));
+        if env == 0, env = max(abs(f)); end
+        tau = max(realN/3, 1);
+        n   = (1:(N-realN)).';
+        f(realN+1:N) = env * 1e-3 * exp(-n/tau);   % strictly > 0, ~1e-6 of signal
+    else
+        f(realN+1:N) = 0;
+    end
+    MRS.fids(:,1) = f;
 end

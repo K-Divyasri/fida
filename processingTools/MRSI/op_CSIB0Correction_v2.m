@@ -43,20 +43,44 @@ function [MRSIStruct, MRSIStruct_w, freqMap, R2Map] = op_CSIB0Correction_v2(MRSI
         mask = ones(MRSIStruct.sz(2:3));
     end
 
-    max_tpt_range=10:MRSIStruct_w.sz(1);
-    freqMap=zeros([prod(MRSIStruct_w.sz(2:3)) length(max_tpt_range)]);
-    R2Map=zeros([prod(MRSIStruct_w.sz(2:3)) length(max_tpt_range)]);
-    
     data_w=reshape(MRSIStruct_w.data,MRSIStruct_w.sz(1),[]);
     %figure;
     idx=find(mask>0);
-    for max_tpt=max_tpt_range
+
+    % Cap the phase-fit window at the REAL (non-zero) FID length. Zero-filling
+    % the time domain (e.g. 576 -> 4096) pads with zeros whose phase is
+    % meaningless; fitting over them adds nothing and makes this O(Nt^2) double
+    % loop ~50x slower. Detect where the FID actually ends from a masked voxel.
+    if ~isempty(idx)
+        refFid   = abs(fft(ifftshift(data_w(:, idx(1)))));
+        lastReal = find(refFid > 1e-6*max(refFid), 1, 'last');
+    else
+        lastReal = MRSIStruct_w.sz(1);
+    end
+    if isempty(lastReal), lastReal = MRSIStruct_w.sz(1); end
+    max_tpt_range = 10:min(MRSIStruct_w.sz(1), lastReal);
+
+    freqMap=zeros([prod(MRSIStruct_w.sz(2:3)) length(max_tpt_range)]);
+    R2Map=zeros([prod(MRSIStruct_w.sz(2:3)) length(max_tpt_range)]);
+
+    % Precompute each masked voxel's FID + unwrapped phase ONCE. The FID does
+    % not depend on max_tpt, so recomputing fft/unwrap inside the max_tpt loop
+    % (as before) repeated the same transform length(max_tpt_range) times per
+    % voxel for nothing.
+    nMax   = length(max_tpt_range);
+    phiAll = zeros(size(data_w,1), length(idx));   % [Nspec, nVox] unwrapped phase
+    for i = 1:length(idx)
+        fid_i        = fft(ifftshift(data_w(:,idx(i))));
+        phiAll(:,i)  = unwrap(angle(fid_i));
+    end
+
+    for m=1:nMax
+        max_tpt = max_tpt_range(m);
         for i=1:length(idx)
             try
-                data_fid_w = fft(ifftshift(data_w(:,idx(i))));
-                [P,S]=polyfit(MRSIStruct_w.spectralTime(1:max_tpt),unwrap(angle(data_fid_w(1:max_tpt))),1);
-                freqMap(idx(i),max_tpt-max_tpt_range(1)+1)=P(1)/(2*pi);
-                R2Map(idx(i),max_tpt-max_tpt_range(1)+1)=S.rsquared;
+                [P,S]=polyfit(MRSIStruct_w.spectralTime(1:max_tpt),phiAll(1:max_tpt,i),1);
+                freqMap(idx(i),m)=P(1)/(2*pi);
+                R2Map(idx(i),m)=S.rsquared;
                 % uncomment next part if you want to see voxels that are not
                 % fitting well:
                 % if S.rsquared<.5

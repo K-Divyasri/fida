@@ -545,12 +545,12 @@ function show_spectrum(hs, p, ijk_mrsi, img_size)
             % curve.  Indexing the data directly guarantees the nii_viewer
             % spectrum is identical to the integration panel.
             %
-            % The ccav_w overlay (written by mrsi_on_t1_map) is correct, but
-            % ftSpec_smooth is stored 180 deg rotated (flipped in BOTH x and y)
-            % relative to ccav_w.  The overlay voxel shown at NIfTI (a,b) is
-            % ccav_w(Nx-a+1, b); the ftSpec voxel that PHYSICALLY matches it is
-            % (ix = a, iy = Ny - b + 1).  Pull that so the spectrum belongs to
-            % the clicked overlay voxel.
+            % The overlay (ccav_w via mrsi_on_t1_map, permute([x,y,t])+flip(vol,1))
+            % puts ccav_w(x=Nx-a+1, y=b) at NIfTI voxel (a,b). ftSpec is stored
+            % rot180 (lr+ud) from ccav_w -- confirmed VISUALLY on the offset inner
+            % bottle (the symmetric phantom hid it from correlation). So the
+            % ftSpec voxel at the same physical location is (ix=a, iy=Ny-b+1).
+            % See memory [[mrsi-geometry-fixes-jul2026]] / [[ccavw-ftspec-180-rotation]].
             ft   = p.ftSpec_smooth_w;
             fDim = ft.dims.f;  if fDim == 0, fDim = ft.dims.t; end
             Ny_d = ft.sz(ft.dims.y);
@@ -574,8 +574,7 @@ function show_spectrum(hs, p, ijk_mrsi, img_size)
     clear_axis_content(hs.ax(4));
     
     if show_freq
-        % Panel index of the pulled ftSpec voxel (ix=a, iy=Ny-b+1) is (a, b),
-        % which matches the integration panel's index for the same spectrum.
+        % Label shows the clicked overlay voxel (a, b).
         px_p = ijk_mrsi(1);
         py_p = ijk_mrsi(2);
 
