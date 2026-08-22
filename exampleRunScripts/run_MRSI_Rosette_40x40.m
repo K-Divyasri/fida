@@ -4,6 +4,15 @@ kFile         = 'C:\Users\divya\Downloads\fida codes\fid_a\processingTools\MRSI\
 % Reconstruction choices
 dcfMethod     = 'pipe_menon';        % 'nn' | 'voronoi' | 'pipe_menon' | 'none'
 ftMethod      = 'nufft';     % 'nufft' | 'dft' | 'tikhonov'   (tikhonov auto-skips DCF)
+
+% Off-resonance MFI recon (corrects intra-readout dephasing that
+% underestimates metabolites far from the water carrier on the rosette
+% trajectory). Only used with ftMethod='nufft'. Flip offresSign if the
+% ppm response gets WORSE.
+useOffres  = true;
+nMFI       = 5;
+offresSign = +1;
+
 smoothFwhm    = 20;           % spatial Gaussian FWHM (mm). 0 = NO smoothing.
                              % 20 mm blends the inner/outer bottles (partial
                              % volume) and wrecks per-compartment mM. Use 0 for
@@ -30,8 +39,10 @@ fprintf('--- 1. Loading TWIX pair ---\n');
 
 %% === 2. SPATIAL RECONSTRUCTION (DCF + FT) ==================================
 fprintf('\n--- 2. Spatial reconstruction (dcf=%s, ft=%s) ---\n', dcfMethod, ftMethod);
-ft   = op_CSIRecon(timeCombined_rs,   kFile, dcfMethod, ftMethod);
-ft_w = op_CSIRecon(timeCombined_rs_w, kFile, dcfMethod, ftMethod);
+ft   = op_CSIRecon(timeCombined_rs,   kFile, dcfMethod, ftMethod, ...
+    'offres', useOffres, 'nMFI', nMFI, 'offresSign', offresSign);
+ft_w = op_CSIRecon(timeCombined_rs_w, kFile, dcfMethod, ftMethod, ...
+    'offres', useOffres, 'nMFI', nMFI, 'offresSign', offresSign);
 
 %% === 3. COIL COMBINATION ==================================================
 fprintf('\n--- 3. Coil combination ---\n');
@@ -152,12 +163,14 @@ run_lcm_rosette_portable(paths.metFile, ftSpec_smooth, ftSpec_smooth_w, mask, ..
 Nx = numel(getCoordinates(ftSpec, 'x'));
 Ny = numel(getCoordinates(ftSpec, 'y'));
 [map, crlb, LW, SNR] = op_CSILCModelMaps(Nx, Ny, paths.rawFolder, ...
-    'figure_folder_name', 'maps');
-apply_water_scaling_all;   % was apply_water_scaling_all
+    'figure_folder_name', 'maps', ...
+    'metabList', {'Lac' 'Act' 'Cr' 'Cho'});   % this phantom's basis labels
+  % was apply_water_scaling_all
 save('map.mat', 'map', '-v7.3');
 save('crlb.mat', 'crlb', '-v7.3');
 save('LW.mat', 'LW', '-v7.3');
 save('SNR.mat', 'SNR', '-v7.3');
+apply_water_scaling_all; 
 
 out = create_separate_metabolite_niftis_v2(ftSpec_smooth, map, crlb, LW, SNR, ...
         paths.t1Path, paths.emptyNiiPath, paths.mapsDir);
