@@ -40,15 +40,27 @@ function ftSpatial = op_CSIRecon(MRSIStruct, kFile, dcfMethod, ftMethod, varargi
         return;
     end
 
+    % Split Name/Value args: off-resonance/MFI options go to the NUFFT backend,
+    % everything else goes to the DCF backend.
+    reconKeys = {'offres', 'nMFI', 'offresSign'};
+    reconOpts = {};  dcfArgs = {};
+    for a = 1:2:numel(varargin)
+        if any(strcmpi(varargin{a}, reconKeys))
+            reconOpts(end+1:end+2) = varargin(a:a+1); %#ok<AGROW>
+        else
+            dcfArgs(end+1:end+2)   = varargin(a:a+1); %#ok<AGROW>
+        end
+    end
+
     skipDcf = strcmpi(ftMethod, 'tikhonov') || strcmpi(ftMethod, 'tikh') ...
               || strcmpi(dcfMethod, 'none');
 
     if skipDcf
         fprintf('=== op_CSIRecon: ft=%s  (DCF skipped) ===\n', ftMethod);
-        ftSpatial = op_CSIReconstruct(MRSIStruct, kFile, ftMethod);
+        ftSpatial = op_CSIReconstruct(MRSIStruct, kFile, ftMethod, reconOpts{:});
     else
         fprintf('=== op_CSIRecon: dcf=%s  ft=%s ===\n', dcfMethod, ftMethod);
-        dComp     = op_CSIPSFCorrection(MRSIStruct, kFile, dcfMethod, varargin{:});
-        ftSpatial = op_CSIReconstruct(dComp, kFile, ftMethod);
+        dComp     = op_CSIPSFCorrection(MRSIStruct, kFile, dcfMethod, dcfArgs{:});
+        ftSpatial = op_CSIReconstruct(dComp, kFile, ftMethod, reconOpts{:});
     end
 end

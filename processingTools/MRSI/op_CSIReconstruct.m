@@ -1,4 +1,6 @@
-function ftSpatial = op_CSIReconstruct(dComp, kFile, method)
+function ftSpatial = op_CSIReconstruct(dComp, kFile, method, varargin)
+%   Extra Name/Value pairs (e.g. 'offres',true,'nMFI',5) are forwarded to the
+%   NUFFT backend only.
 %OP_CSIRECONSTRUCT  Unified spatial-reconstruction dispatcher for CSI.
 %
 %   ftSpatial = op_CSIReconstruct(dComp, kFile, method)
@@ -18,7 +20,7 @@ function ftSpatial = op_CSIReconstruct(dComp, kFile, method)
     methodLower = lower(string(method));
     switch methodLower
         case "nufft"
-            ftSpatial = op_NUFFTSpatial1(dComp, kFile);
+            ftSpatial = op_NUFFTSpatial1(dComp, kFile, varargin{:});
 
         case "dft"
             ftSpatial = op_CSIFourierTransform_dft(dComp, kFile, ...
