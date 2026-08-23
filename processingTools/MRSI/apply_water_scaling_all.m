@@ -41,10 +41,10 @@ TE = ftSpec_smooth.te;      % ms  (or type a number, e.g. 35)
 TR = ftSpec_smooth.tr;      % ms  (or type a number, e.g. 2000)
 
 % Water reference relaxation (ms). GE Braino is GADOLINIUM-doped so its
-% relaxation is set NEAR BRAIN TISSUE (per GE), NOT pure water. Gd content
-% varies per batch and DEGRADES with age -> MEASURE for publication. These
-% brain-3T-like values give factor ~1 (matches the raw==GT observation).
-T1w = 1200;  T2w = 250;
+% Water relaxation (ms) -- only used when doRelax=true. Pick per phantom, MEASURE:
+%   Gd-doped GE Braino (~brain 3T): T1w=1200  T2w=250
+%   Undoped aqueous built phantom (no Gd -> long): T1w=2800  T2w=1500
+T1w = 2800;  T2w = 1500;   % active = built (undoped) phantom
 
 % Per-metabolite [T1 T2] in ms. GE Braino is Gd-doped to ~in-vivo brain 3T, so
 % these are literature 3T brain values (Mlynarik/Wyss). MEASURE/cite for

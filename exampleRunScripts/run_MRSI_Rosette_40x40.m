@@ -7,16 +7,17 @@ ftMethod      = 'nufft';     % 'nufft' | 'dft' | 'tikhonov'   (tikhonov auto-ski
 
 % Off-resonance MFI recon (corrects intra-readout dephasing that
 % underestimates metabolites far from the water carrier on the rosette
-% trajectory). Only used with ftMethod='nufft'. Flip offresSign if the
-% ppm response gets WORSE.
-useOffres  = true;
+% trajectory). Only used with ftMethod='nufft'. Validate PER DATASET:
+% run once false (baseline), once true, compare to GT. Flip offresSign if
+% the far-from-water peaks get WORSE.
+useOffres  = false;   % baseline first for this 2-bottle set; flip to test MFI
 nMFI       = 5;
 offresSign = +1;
 
-smoothFwhm    = 20;           % spatial Gaussian FWHM (mm). 0 = NO smoothing.
-                             % 20 mm blends the inner/outer bottles (partial
-                             % volume) and wrecks per-compartment mM. Use 0 for
-                             % quantification; a bigger value only for overlays.
+smoothFwhm    = 0;            % spatial Gaussian FWHM (mm). 0 = NO smoothing.
+                             % TWO-bottle phantom: 20 mm blends inner<->outer
+                             % (partial volume) and wrecks per-compartment mM.
+                             % MUST be 0 for quantification here.
 
 % LCModel — leave lcmbin empty to skip LCModel + map generation
 
