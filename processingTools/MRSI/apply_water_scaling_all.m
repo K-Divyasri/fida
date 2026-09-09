@@ -26,7 +26,7 @@
 %     ATTH2O/ATTMET (~0.66 for the pure-water guesses -> values ~halved), even
 %     though the raw values already match ground truth.
 %   true: apply the correction (only trustworthy with measured relaxation).
-doRelax = false;   % raw LCModel water-scaled output was closest to GT; guessed
+doRelax = false;   % UNMEASURED T1/T2 -> guessed bias (~0.5-0.6x). Keep raw LCModel mM until measured.   % raw LCModel water-scaled output was closest to GT; guessed
                    % relaxation over-shrinks (~0.83x). Set true ONLY with
                    % MEASURED phantom T1w/T2w + per-metabolite T1/T2.
 if ~doRelax
@@ -44,7 +44,7 @@ TR = ftSpec_smooth.tr;      % ms  (or type a number, e.g. 2000)
 % Water relaxation (ms) -- only used when doRelax=true. Pick per phantom, MEASURE:
 %   Gd-doped GE Braino (~brain 3T): T1w=1200  T2w=250
 %   Undoped aqueous built phantom (no Gd -> long): T1w=2800  T2w=1500
-T1w = 2800;  T2w = 1500;   % active = built (undoped) phantom
+T1w = 1200;  T2w = 250;   % active = built (undoped) phantom
 
 % Per-metabolite [T1 T2] in ms. GE Braino is Gd-doped to ~in-vivo brain 3T, so
 % these are literature 3T brain values (Mlynarik/Wyss). MEASURE/cite for

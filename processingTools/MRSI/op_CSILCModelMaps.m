@@ -7,6 +7,7 @@ function [map,crlb,LW,SNR] = op_CSILCModelMaps(size_x,size_y,lcmodel_output_loca
         lcmodel_output_location (1,:) char
         options.figure_folder_name (1,:) char = "false"
         options.metabList (1,:) cell = {'Lac' 'Act' 'Cr' 'Cho'}
+        %options.metabList (1,:) cell = {'NAA' 'Cr' 'Cho' 'Ins' 'Glu' 'Lac'}
     end
 
    %Create the structure of the maps we want

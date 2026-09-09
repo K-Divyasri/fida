@@ -65,7 +65,12 @@ function lipidBasis = createLipipBasis(MRSIStruct, lipidComponents, lineWidthRan
                                                   lineWidthRange, lipidPPMRange, ...
                                                   lipidStructure);
     end
-    lipidBasis = fftshift(fft(fidBasis, [], 1), 1);   % match data spectral convention (op_CSIFourierTransform uses ifft)
+    % MUST match the data's spectral convention EXACTLY: op_CSIFourierTransform
+    % does spec = fftshift(ifft(fid)). The old fft(conj(fid)) form produced the
+    % complex CONJUGATE (anti-causal) basis -> orthogonal to real water -> the
+    % L2 projection removed ~0% of water (audit: 99.4% retained; residual water
+    % 49x NAA in the LCModel RAW). Causal basis: 99.7% removed, metabs <2.5% change.
+    lipidBasis = spectralPoints * fftshift(ifft(fidBasis, [], 1), 1);
 end
 
 % calculate the single lipid spectra for the basis
@@ -75,7 +80,7 @@ function lipidFids = getRandomLipidFids(spectralPoints, spectralWidth, lineWidth
     lipidSystem.shifts = randomPPM;
 
     simulatedSignal = sim_onepulse(spectralPoints, spectralWidth, 3, randomLineWidth, lipidSystem);
-    simulatedSignal = op_complexConj(simulatedSignal);
+    % NO conj: the basis FID must be causal, same convention as the data FID.
     simulatedSignal = addRandomPhase(simulatedSignal);
     %simulatedSignal = scaleSpectra(simulatedSignal, randomPPM, lipidPPMRange);
     lipidFids = simulatedSignal.fids;

@@ -118,17 +118,24 @@ function w = pipe_menon(kx, ky, S, iters)
 
     w = abs(w);
 
-    %% clippingggg
-    % The 76 origin copies converge to near-zero (DC is heavily oversampled)
-    % The floor raises them slightly so DC is not completely suppressed
-    % The cap removes runaway large weights from sparse trajectory gaps
-    lo = prctile(w, 2);
+    %% clipping — CAP ONLY, no low floor.
+    % The rosette revisits k=0 once per petal (~76 coincident origin copies).
+    % Pipe-Menon correctly drives each to near-zero so their SUM = one properly
+    % weighted DC sample. A low floor (prctile 2) re-inflated all 76 back up ->
+    % DC over-weighted ~76x -> the gridded NUFFT concentrated that water-DC onto
+    % the FOV-CENTER voxel -> inverted water / dropout / LCModel CRLB 999.
+    % Cap-only matches op_CSIPSFCorrection_nn and Jason's op_CSIPSFCorrection_jn.
     hi = prctile(w, 98);
-    w  = max(min(w, hi), lo);
-    fprintf('Clipped to [%.4e, %.4e]\n', lo, hi);
+    w  = min(w, hi);                 % cap runaway sparse-gap weights; keep DC near-zero
+    fprintf('Capped to [-, %.4e] (no low floor: DC stays suppressed)\n', hi);
 
     window = max(round(Nk / 80), 5);   % ~120 points for Nk=9576
-    w = radialSmooth(kx, ky, w, window);
+    % Smooth only r>0: the coincident origin copies (k=0, one per shot) keep
+    % their Pipe-Menon near-zero weights. Smoothing them with ring-2 neighbours
+    % re-inflated the DC ~13x (ratio-neutral but wrong).
+    orig = hypot(kx, ky) < 1e-9;
+    w_s  = radialSmooth(kx(~orig), ky(~orig), w(~orig), window);
+    w(~orig) = w_s;
     fprintf('Radial smooth (win=%d):  min=%.4e  max=%.4e\n', ...
         window, min(w), max(w));
 end

@@ -1,49 +1,32 @@
-datasetFolder = 'F:\fida\divya\newPhantom_20251119 - Copy\subject07';
+%% run_MRSI_Rosette_40x40.m  —  rosette phantom, straight run, NO MFI.
+% load -> recon -> combine -> average -> [2 Hz filter -> zero-pad 4x] -> spectral
+% FT -> [1st-order phase 1.2e-4 s] -> water/lipid removal + B0 -> LCModel -> maps.
+% Prof preprocessing (step 4c + phase after FT): apodize-then-zeropad avoids the
+% truncation ripple that a bare spectral zero-fill caused.
+
+datasetFolder = 'F:\fida\divya\20260831_ulinePhantom_test\subject04';
 kFile         = 'C:\Users\divya\Downloads\fida codes\fid_a\processingTools\MRSI\kFiles\Rosette_traj_40x40.txt';
 
-% Reconstruction choices
-dcfMethod     = 'pipe_menon';        % 'nn' | 'voronoi' | 'pipe_menon' | 'none'
-ftMethod      = 'nufft';     % 'nufft' | 'dft' | 'tikhonov'   (tikhonov auto-skips DCF)
+dcfMethod = 'pipe_menon';    % 'nn' | 'voronoi' | 'pipe_menon' | 'none'
+ftMethod  = 'nufft';         % 'nufft' | 'dft' | 'tikhonov'
 
-% Off-resonance MFI recon (corrects intra-readout dephasing that
-% underestimates metabolites far from the water carrier on the rosette
-% trajectory). Only used with ftMethod='nufft'. Validate PER DATASET:
-% run once false (baseline), once true, compare to GT. Flip offresSign if
-% the far-from-water peaks get WORSE.
-useOffres  = false;   % baseline first for this 2-bottle set; flip to test MFI
-nMFI       = 5;
-offresSign = +1;
-
-smoothFwhm    = 0;            % spatial Gaussian FWHM (mm). 0 = NO smoothing.
-                             % TWO-bottle phantom: 20 mm blends inner<->outer
-                             % (partial volume) and wrecks per-compartment mM.
-                             % MUST be 0 for quantification here.
-
-% LCModel — leave lcmbin empty to skip LCModel + map generation
-
-lcmOwner      = 'Divyasri Krishnkaumar, Sunnybrook Research Institute';
-hzpppm        = 123.25;      % PLACEHOLDER ONLY - overwritten from ftSpec_smooth.txfrq before step 9
-deltat        = 0.00063;     % matches rosette data SW 1587 Hz
-nunfil        = 576;         % matches rosette data point count
-echot         = 15;          % matches rosette data TE
-ppmst         = 4.25;
-ppmend        = 0.2;
+lcmOwner  = 'Divyasri Krishnkaumar, Sunnybrook Research Institute';
+ppmst     = 4.25;
+ppmend    = 0.2;
 
 %% === RESOLVE PATHS ========================================================
 assert(exist(kFile,'file')==2, 'k-file missing: %s', kFile);
 paths = file_path_load(datasetFolder);
 
-%% === 1. LOAD ===============================================================
+%% === 1. LOAD ==============================================================
 fprintf('--- 1. Loading TWIX pair ---\n');
 [timeCombined_rs, timeCombined_rs_w] = io_CSIload_twix_pair( ...
     paths.metFile, paths.refFile, kFile);
 
-%% === 2. SPATIAL RECONSTRUCTION (DCF + FT) ==================================
+%% === 2. SPATIAL RECONSTRUCTION (DCF + NUFFT, no MFI) ======================
 fprintf('\n--- 2. Spatial reconstruction (dcf=%s, ft=%s) ---\n', dcfMethod, ftMethod);
-ft   = op_CSIRecon(timeCombined_rs,   kFile, dcfMethod, ftMethod, ...
-    'offres', useOffres, 'nMFI', nMFI, 'offresSign', offresSign);
-ft_w = op_CSIRecon(timeCombined_rs_w, kFile, dcfMethod, ftMethod, ...
-    'offres', useOffres, 'nMFI', nMFI, 'offresSign', offresSign);
+ft   = op_CSIRecon(timeCombined_rs,   kFile, dcfMethod, ftMethod);
+ft_w = op_CSIRecon(timeCombined_rs_w, kFile, dcfMethod, ftMethod);
 
 %% === 3. COIL COMBINATION ==================================================
 fprintf('\n--- 3. Coil combination ---\n');
@@ -55,85 +38,68 @@ fprintf('\n--- 4. Averaging + water mask ---\n');
 ccav   = op_CSIAverage(coilCombined);
 ccav_w = op_CSIAverage(coilCombined_w);
 ccav_w = op_CSISegment_simple(ccav_w);
-%ccav_w.mask.brainmasks=ccav_w.mask.brainmask;
 ccav.mask = ccav_w.mask;
-
 mask   = ccav_w.mask.brainmasks;
 
-%% === 4b. LEFT-SHIFT (time domain, before spectral FT) =====================
-% Left-shift removes the FID first-point 1st-order phase (ADC/echo delay).
-% NOTE: zero-fill moved to AFTER B0 correction (step 6) so lipid removal and
-% B0 run on the short native FID (fast, no zero-padded region to distort);
-% only the final spectrum is interpolated. See op_CSIspecZeroFill.
+%% === 4b. LEFT-SHIFT (removes FID first-point 1st-order phase) =============
 fprintf('\n--- 4b. Left-shift ---\n');
 ccav   = op_CSIleftshift(ccav);            % uses ccav.pointsToLeftshift
 ccav_w = op_CSIleftshift(ccav_w);
+
+%% === 4c. PROF PREPROCESSING: 2 Hz filter -> zero-pad 4x (time domain) =====
+% Apodize FIRST so the FID decays, THEN zero-pad 576 -> 2304 -> finer ppm grid
+% with NO truncation ripple. First-order phase is applied after the spectral FT.
+lb       = 0;             % 2 Hz filter HURT (broadens narrow phantom lines) -> off.
+zfTarget = 576 * 4;       % zero-pad 576 -> 2304  (this is the part that helps)
+fprintf('\n--- 4c. Time filter (%g Hz) + zero-pad -> %d ---\n', lb, zfTarget);
+ccav   = op_CSIFilter(ccav,   lb);         % 2 Hz exponential LB (op_filter analogue)
+ccav_w = op_CSIFilter(ccav_w, lb);
+ccav   = op_CSItimeZeroFill(ccav,   zfTarget);
+ccav_w = op_CSItimeZeroFill(ccav_w, zfTarget);
 
 %% === 5. SPECTRAL FT =======================================================
 fprintf('\n--- 5. Spectral FT ---\n');
 ftSpec   = op_CSIFourierTransform(ccav);
 ftSpec_w = op_CSIFourierTransform(ccav_w);
-save('ftSpec.mat', 'ftSpec', '-v7.3');
+
+% First-order phase: 1.2e-4 s HURT (data already left-shifted + LCModel phases
+% it) -> off. Applied only if foPhase ~= 0. (sweep_ge_preproc: every phase made
+% it worse; zero-pad-only was best, MAE 0.18.)
+foPhase = 0;              % seconds; set nonzero only if a future dataset needs it
+if foPhase ~= 0
+    ftSpec   = op_CSIaddPhase(ftSpec,   0, foPhase, 4.65);
+    ftSpec_w = op_CSIaddPhase(ftSpec_w, 0, foPhase, 4.65);
+end
+
+save('ftSpec.mat',   'ftSpec',   '-v7.3');
 save('ftSpec_w.mat', 'ftSpec_w', '-v7.3');
 
 %% === 6. LIPID + WATER REMOVAL + B0 CORRECTION =============================
 fprintf('\n--- 6. Lipid / water removal + B0 correction ---\n');
-%ftSpec_rmlip = op_CSIssp(ftSpec, 0.8, 1.88);
-ftSpec_rmw   = op_CSIRemoveLipids(ftSpec, ...
-                  'lipidPPMRange',  [4.5 5.0], ...
-                  'linewidthRange', [1 10]);
-% tmp        = op_CSIRemoveWater(ftSpec,[4.4 5.0],50);
-% ftSpec_rmw = op_CSIRemoveLipids(tmp,'lipidPPMRange',[4.4 5.0],'linewidthRange',[5 40],'beta',5e-4);
+ftSpec_rmw = op_CSIRemoveLipids(ftSpec, ...
+                'lipidPPMRange',  [4.5 5.0], ...
+                'linewidthRange', [1 10]);
 [ftSpec_B0corr, ftSpec_B0corr_w, freqMap, R2Map] = ...
     op_CSIB0Correction_v2(ftSpec_rmw, ftSpec_w);
 
-% Zero-fill NOW (after B0), interpolating the processed spectrum 576 -> 4096
-% for finer ppm sampling / better LCModel peak separation. Padding the native
-fprintf('  Zero-fill (spectral) 576 -> 4096 ...\n');
-ftSpec_B0corr   = op_CSIspecZeroFill(ftSpec_B0corr,   4096);
-ftSpec_B0corr_w = op_CSIspecZeroFill(ftSpec_B0corr_w, 4096);
+ftSpec_masked   = op_CSIapplymask(ftSpec_B0corr);   % no zero-fill, no smoothing
 
-ftSpec_masked = op_CSIapplymask(ftSpec_B0corr);
+[ftSpec_smooth] = op_CSIApodize(ftSpec_masked,'functionType','gaussian','fullWidthHalfMax',20);
+[ftSpec_smooth_w] = op_CSIApodize(ftSpec_B0corr_w,'functionType','gaussian','fullWidthHalfMax',20);
 
-%% === 7. SPATIAL SMOOTHING =================================================
-% op_CSIApodize divides by sigma, so FWHM=0 would blow up. Skip it entirely
-% when smoothFwhm<=0 and pass the un-smoothed spectra straight through (the
-% variables keep the _smooth name so steps 8-9 need no change).
-if smoothFwhm > 0
-    fprintf('\n--- 7. Spatial smoothing (Gaussian, FWHM=%g mm) ---\n', smoothFwhm);
-    ftSpec_smooth   = op_CSIApodize(ftSpec_masked,  ...
-                           'functionType','gaussian','fullWidthHalfMax',smoothFwhm);
-    ftSpec_smooth_w = op_CSIApodize(ftSpec_B0corr_w, ...
-                           'functionType','gaussian','fullWidthHalfMax',smoothFwhm);
-else
-    fprintf('\n--- 7. Spatial smoothing: SKIPPED (smoothFwhm=%g) ---\n', smoothFwhm);
-    ftSpec_smooth   = ftSpec_masked;
-    ftSpec_smooth_w = ftSpec_B0corr_w;
-end
+
 op_CSIPlot(ftSpec_smooth);
 
-%% === 8. WRITE 4D NIFTI + OPEN VIEWER ======================================
-fprintf('\n--- 8. Writing 4D MRSI NIfTI ---\n');
+%% === 7. WRITE 4D NIFTI + VIEWER ===========================================
+fprintf('\n--- 7. Writing 4D MRSI NIfTI ---\n');
 mrsiout = mrsi_on_t1_map(ccav_w, ftSpec_smooth, paths.mrsiOut, paths.emptyNiiPath);
 nii_viewer(paths.t1Path, mrsiout.mrsi4D_time);
 
-lcmbin        = '/home/divya/.lcmodel/bin/lcmodel';   % e.g. '/home/divya/.lcmodel/bin/lcmodel'
-% Basis rebuilt at the data dwell (BADELT = DELTAT = 6.3e-4 s, SW 1587 Hz)
-% so LCModel no longer resamples it (kills the MYBASI 8 warning).
-basisFile     = 'C:\Users\divya\Downloads\fida codes\fid_a\basis_rosette_phantom\RosettePhantom_LacAceCrCho_TE15_SW1587.basis';
+lcmbin    = '/home/divya/.lcmodel/bin/lcmodel';
+basisFile = 'C:\Users\divya\Downloads\fida codes\fid_a\basis_braino\Braino.basis';
 
-
-
-%% === 9. LCMODEL + METABOLITE MAPS =========================================
-if isempty(lcmbin)
-    fprintf('\n--- 9. LCModel: SKIPPED (lcmbin empty) ---\n');
-    fprintf('\n=== Pipeline complete.  Outputs in %s ===\n', paths.outputDir);
-    return
-end
-
-% Auto-derive LCModel timing from the data so the control matches the basis.
-% The hard-coded hzpppm=123.25 above was WRONG (real value 123.19877) and was
-% the sole remaining cause of the MYBASI 8 warning once BADELT was fixed.
+%% === 8. LCMODEL + METABOLITE MAPS =========================================
+% LCModel timing derived from the data so the control matches the basis.
 specDim = ftSpec_smooth.dims.f;
 if specDim == 0, specDim = ftSpec_smooth.dims.t; end
 hzpppm = ftSpec_smooth.txfrq / 1e6;
@@ -142,8 +108,11 @@ nunfil = ftSpec_smooth.sz(specDim);
 echot  = ftSpec_smooth.te;
 fprintf('  LCModel timing (from data): HZPPPM=%.5f  DELTAT=%.8f  NUNFIL=%d  ECHOT=%g\n', ...
         hzpppm, deltat, nunfil, echot);
+if abs(echot - 15) > 1
+    warning('Data TE=%.1f ms but basis is TE=15 ms. Rebuild the basis at the data TE.', echot);
+end
 
-fprintf('\n--- 9. LCModel + maps ---\n');
+fprintf('\n--- 8. LCModel + maps ---\n');
 run_lcm_rosette_portable(paths.metFile, ftSpec_smooth, ftSpec_smooth_w, mask, ...
     'basisFile',  basisFile, ...
     'lcmodelBin', lcmbin, ...
@@ -155,28 +124,23 @@ run_lcm_rosette_portable(paths.metFile, ftSpec_smooth, ftSpec_smooth_w, mask, ..
     'echot',      echot, ...
     'ppmst',      ppmst, ...
     'ppmend',     ppmend, ...
-    'doecc',      false);   % LCModel eddy-current OFF: op_CSIB0Correction_v2
-                            % already did the water-phase (Klose) correction
-                            % in-pipeline, and DOECC=T would divide the metab
-                            % FID by the zero-filled water tail (0/0 -> NaN ->
-                            % SOLVE FATAL). DOWS/water scaling stays ON.
+    'doecc',      false);   % B0 correction already did the water-phase in-pipeline
 
 Nx = numel(getCoordinates(ftSpec, 'x'));
 Ny = numel(getCoordinates(ftSpec, 'y'));
 [map, crlb, LW, SNR] = op_CSILCModelMaps(Nx, Ny, paths.rawFolder, ...
     'figure_folder_name', 'maps', ...
-    'metabList', {'Lac' 'Act' 'Cr' 'Cho'});   % this phantom's basis labels
-  % was apply_water_scaling_all
-save('map.mat', 'map', '-v7.3');
+    'metabList', {'NAA' 'Cr' 'Cho' 'Ins' 'Glu' 'Lac'});
+save('map.mat',  'map',  '-v7.3');
 save('crlb.mat', 'crlb', '-v7.3');
-save('LW.mat', 'LW', '-v7.3');
-save('SNR.mat', 'SNR', '-v7.3');
-apply_water_scaling_all; 
+save('LW.mat',   'LW',   '-v7.3');
+save('SNR.mat',  'SNR',  '-v7.3');
+
+apply_water_scaling_all;   % 3-compartment GT + raw mM (relaxation off)
 
 out = create_separate_metabolite_niftis_v2(ftSpec_smooth, map, crlb, LW, SNR, ...
         paths.t1Path, paths.emptyNiiPath, paths.mapsDir);
-%nii_viewer(paths.t1Path, paths.mapsDir);
-nii_viewer(paths.t1Path, out.metabolite_4d_files);
-allMaps = [out.metabolite_4d_files, out.crlb_3d_files,{out.shared_lw_3d_file, out.shared_snr_3d_file}];
-nii_viewer(paths.t1Path, allMaps);
+%nii_viewer(paths.t1Path, out.metabolite_4d_files);
+allMaps = [out.metabolite_4d_files, out.crlb_3d_files, {out.shared_lw_3d_file, out.shared_snr_3d_file}];
+%nii_viewer(paths.t1Path, allMaps);
 fprintf('\n=== Pipeline complete.  Outputs in %s ===\n', paths.outputDir);

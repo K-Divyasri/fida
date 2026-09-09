@@ -83,21 +83,31 @@ function w = dcf_nearest(kx, ky, K)
     rho  = zeros(N, 1);       % geometric density per point
     kRep = zeros(N, 1);       % number of co-located duplicates
 
+    max_radius = max(hypot(kx, ky));                  % for edge correction (jn)
     for i = 1:N
         d       = hypot(kx - kx(i), ky - ky(i));
         kRep(i) = sum(d == 0);                        %includes self
         sd      = sort(d);
         kdist   = sd(min(K + kRep(i), N));             %skip duplicates justincase outofbound
-        rho(i)  = K / (pi * max(kdist, eps)^2);         %same as jamie's/lubna's code
+        % edge correction — matches Jason's jn: near the boundary the k-th NN
+        % distance overshoots empty space, so boost density (down-weight edge).
+        distanceToBoundary = max_radius - hypot(kx(i), ky(i));
+        if kdist > distanceToBoundary
+            cf = 1 + (1 - distanceToBoundary / max(kdist, eps));
+        else
+            cf = 1;
+        end
+        rho(i)  = cf * K / (pi * max(kdist, eps)^2);   %jn density formula + edge cf
     end
 
     %geometric weight (ignoring duplicates)
     w_geo = 1 ./ max(rho, eps);
 
-    %radial smoothing (geometry only, kRep not yet applied)
-    window = max( ...
-        round(N / 50), 5);
-    w_geo  = radialSmooth(kx, ky, w_geo, window); %%this is technically cheating so talk to mark and jamie
+    % Radial smoothing REMOVED to match Jason's jn DCF (jn does NO weight
+    % smoothing). It redistributed center/edge weight and over-concentrated the
+    % FOV center (center/median 29 vs Jason 11). Re-enable only if you need it.
+    % window = max(round(N / 50), 5);
+    % w_geo  = radialSmooth(kx, ky, w_geo, window);
 
     %divide by kRep so each duplicate gets its fair share
     w = w_geo ./ kRep;

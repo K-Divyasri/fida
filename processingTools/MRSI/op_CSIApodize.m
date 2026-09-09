@@ -41,8 +41,11 @@ function MRSIStruct = op_CSIApodize(MRSIStruct, filterArguments)
                 xWeights = gaussian(kGridX, kMaxX/2);
                 yWeights = gaussian(kGridY, kMaxY/2);
             else
-                halfFullWidth = filterArguments.fullWidthHalfMax/2;
-                sigma = sqrt(halfFullWidth^2/2*log(0.5));
+                % Gaussian sigma from FWHM: sigma = FWHM / (2*sqrt(2*ln2)).
+                % (Old form sqrt(hw^2/2*log(0.5)) was IMAGINARY (log(0.5)<0) and,
+                % with the old -exp(+x^2) kernel, gave an effective FWHM ~13.9 mm
+                % instead of 20 and a negative kernel.)
+                sigma = filterArguments.fullWidthHalfMax / (2*sqrt(2*log(2)));
                 xCoordinate = getCoordinates(MRSIStruct, 'x');
                 yCoordinate = getCoordinates(MRSIStruct, 'y');
 
@@ -99,5 +102,5 @@ function MRSIStruct = op_CSIApodize(MRSIStruct, filterArguments)
 end
 
 function y = gaussian(x, sigma)
-    y = -exp(x.^2/(2*sigma.^2));
+    y = exp(-x.^2/(2*sigma.^2));      % proper decaying, positive Gaussian
 end

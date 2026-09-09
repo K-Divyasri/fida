@@ -190,6 +190,11 @@ function cfg = parseInputs(varargin)
                               % making Cr vary voxel-to-voxel). Pass 'doecc',
                               % false if it adds ringing on cleaner data.
     cfg.useWSL     = ispc();
+    cfg.dkntmn     = 0.5;     % LCModel min knot spacing (ppm). Bigger = STIFFER.
+                              % 1.0 (7 knots/4 ppm) could not follow the water tail;
+                              % 0.5 lets the spline track it now that water removal works.
+                              % baseline (less spline absorption of tall singlets
+                              % like acetate). Try 2.5 / 5 / 10 for a flat phantom.
     cfg.parallel   = false;   % true -> run voxels with parfor (needs Parallel
                               % Computing Toolbox + an open parpool). Each voxel
                               % is independent (unique xXy files), so it's safe.
@@ -338,13 +343,22 @@ function writeBashScript(outPath, cfg)
     % --- PHANTOM SETTINGS -------------------------------------------------
     % Stiffer baseline: DKNTMN 0.3 was flexible enough for the spline to
     % swallow lone singlets (acetate at 1.904 ppm never fit).
-    wl('  echo "DKNTMN=1.0"');
+    wl(sprintf('  echo "DKNTMN=%g"', cfg.dkntmn));
     wl('  echo "NEACH=999"');
-    % NSIMUL=0 stops LCModel auto-simulating MM/Lip/Gua components. The basis
-    % holds only Lac/Ace/Cr/Cho; the simulated "Gua" singlet was absorbing
-    % signal in low-SNR voxels (conc 20.7 vs Cr 8.0 at voxel 25x18).
-    wl('  echo "NSIMUL=0"');
+    % NSIMUL=1 with ONLY the "-CrCH2" negative singlet (LCModel manual 11.6):
+    % water suppression partially saturates Cr's 3.91-ppm CH2 (data CH2/CH3 =
+    % 0.42 vs 0.67 in the basis), so without this Cr's single basis function
+    % compromises (CH3 -15%, CH2 +43%) and Cr reads low. NSIMUL=0 (old) dropped
+    % this correction; the default NSIMUL also adds MM/Lip/Gua which absorbed
+    % signal in a phantom -> so simulate exactly ONE component, -CrCH2.
+    wl('  echo "NSIMUL=1"');
+    wl('  echo "CHSIMU(1)=''-CrCH2 @ 3.925 +- .02 FWHM= .03 < .1 +- .01 AMP= -1.''"');
     wl('  echo "NOMIT=0"');
+    % First-order phase prior: data show ~25 deg/ppm (intra-petal delay); the
+    % default SDDEGP=20 fights it. Free it so LCModel fits the phase, not the
+    % baseline/amplitudes.
+    wl('  echo "DEGPPM=0."');
+    wl('  echo "SDDEGP=999."');
     % MM/lipid soft constraints reference components not in the basis.
     wl('  echo "NNORAT=0"');
     wl('  echo "NRATIO=0"');
