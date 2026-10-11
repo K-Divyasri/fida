@@ -73,5 +73,5 @@ Example scripts live in `exampleRunScripts/`; the manual is at
 
 ## License
 
-FID-A is released under the BSD license — see [LICENSE.txt](LICENSE.txt).
+FID-A is released under the BSD license see [LICENSE.txt](LICENSE.txt).
 Copyright 2020 Jamie Near.
